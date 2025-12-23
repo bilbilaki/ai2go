@@ -2,10 +2,13 @@ package chat
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/bilbilaki/ai2go/internal/api"
 	"github.com/bilbilaki/ai2go/internal/config"
@@ -49,9 +52,29 @@ func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Con
 				} else {
 					fmt.Printf("\n\033[33m[Auto-Running] Command: %s\033[0m\n", cmdToRun)
 				}
+ctx, cancel := context.WithCancel(context.Background())
+				
+				// 2. Setup signal channel to listen for Ctrl+C
+				sigChan := make(chan os.Signal, 1)
+				signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-				// Execute the command
-				output, err := tools.ExecuteShellCommand(cmdToRun)
+				// 3. Start a goroutine to watch for the signal
+				go func() {
+					select {
+					case <-sigChan:
+						fmt.Println("\n\033[31m!!! Stopping command... !!!\033[0m")
+						cancel() // Cancels the context passed to ExecuteShellCommand
+					case <-ctx.Done():
+						// Command finished normally
+					}
+				}()
+
+				// 4. Execute the command with the context
+				output, err := tools.ExecuteShellCommand(ctx, cmdToRun)
+
+				// 5. Cleanup: Stop listening for signals and ensure context is cancelled
+				signal.Stop(sigChan)
+				cancel()
 
 				// Show the result to the user
 				if err != nil {
@@ -64,3 +87,4 @@ func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Con
 		}
 	}
 }
+				
