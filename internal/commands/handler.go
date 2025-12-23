@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/bilbilaki/ai2go/internal/api"
@@ -65,9 +66,78 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 		
 	case "/help":
 		ShowHelp()
-		
+		case "/setup":
+		HandleSetup(cfg,apiClient)
 	default:
 		fmt.Printf("Unknown command: %s. Type /help for available commands.\n", command)
 	}
 }
 
+func HandleSetup(cfg *config.Config, apiClient *api.Client) {
+	reader := bufio.NewReader(os.Stdin)
+
+	// Prompt for Base URL
+	fmt.Print("Enter Base URL (e.g., https://api.openai.com): ")
+	baseURL, _ := reader.ReadString('\n')
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		fmt.Println("Base URL is required.")
+		return
+	}
+	cfg.SetBaseURL(baseURL)
+
+	// Prompt for API Key
+	fmt.Print("Enter API Key: ")
+	apiKey, _ := reader.ReadString('\n')
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		fmt.Println("API Key is required.")
+		return
+	}
+	cfg.SetAPIKey(apiKey)
+
+	// Prompt for Proxy
+	fmt.Print("Enter Proxy URL (leave blank to disable): ")
+	proxy, _ := reader.ReadString('\n')
+	proxy = strings.TrimSpace(proxy)
+	cfg.SetProxyURL(proxy)
+
+	// Re-init client with new config
+	apiClient = api.NewClient(cfg)
+
+	// Fetch models
+	fmt.Println("Fetching available models...")
+	models, err := apiClient.GetAvailableModels()
+	if err != nil {
+		fmt.Printf("Error fetching models: %v. Please check your Base URL and API Key, then re-run /setup.\n", err)
+		return
+	}
+	if len(models) == 0 {
+		fmt.Println("No models available. Please check your setup and re-run /setup.")
+		return
+	}
+
+	// Display and select model
+	fmt.Printf("\nAvailable Models (%d):\n", len(models))
+	for i, model := range models {
+		fmt.Printf("%d. %s\n", i+1, model.ID)
+	}
+	fmt.Print("Select default model number: ")
+	var input string
+	fmt.Scanln(&input)
+	selection, err := strconv.Atoi(input)
+	if err != nil || selection < 1 || selection > len(models) {
+		fmt.Println("Invalid selection.")
+		return
+	}
+	selectedModel := models[selection-1].ID
+	cfg.SetCurrentModel(selectedModel)
+
+	// Complete setup
+	cfg.FirstSetup = false
+	if err := cfg.Save(); err != nil {
+		fmt.Printf("Error saving config: %v\n", err)
+		return
+	}
+	fmt.Printf("Setup complete! Default model: %s. You can now chat or run /help.\n", selectedModel)
+}

@@ -17,30 +17,21 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
-	// Initialize HTTP client
-	apiClient := api.NewClient(cfg)
-
-	// Test API connection
-	models, err := apiClient.GetAvailableModels()
-	if err != nil {
-		fmt.Printf("Warning: Could not fetch models: %v\n", err)
-		fmt.Println("Using default model:", cfg.CurrentModel)
-	} else {
-		fmt.Printf("Connected successfully. Found %d models.\n", len(models))
-	}
-
-	fmt.Println("\n=== Terminal Assistant with Model Switching ===")
-	commands.ShowHelp()
+fmt.Println("\n=== Terminal Assistant with Model Switching ===")
+ 	commands.ShowHelp()
+	if cfg.FirstSetup {
+	fmt.Println("\n\033[1;33mWelcome! For first setup, run /setup.\033[0m")
+}
+if !cfg.FirstSetup {
 	fmt.Println("\nCurrent model:", cfg.CurrentModel)
-	fmt.Println("\n" + strings.Repeat("=", 50))
+}
+fmt.Println("\n" + strings.Repeat("=", 50))
+ 
+ 	history := chat.NewHistory(cfg.CurrentModel)
 
-	// Initialize chat history
-	history := chat.NewHistory(cfg.CurrentModel)
-	
-	// Get available tools
 	cliTool := tools.GetCLITool()
 	toolsList := []api.Tool{cliTool}
-
+apiClient := api.NewClient(cfg)
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
