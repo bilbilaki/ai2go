@@ -1,0 +1,7 @@
+{
+  "api_key": "sk-0e4401fbed214baabb743f9e05f1c01b",
+  "base_url": "https://api.deepseek.com",
+  "proxy_url": "",
+  "auto_accept": true,
+  "current_model": "deepseek-chat"
+}

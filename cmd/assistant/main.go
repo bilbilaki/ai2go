@@ -56,7 +56,7 @@ func main() {
 
 		// Handle special commands
 		if strings.HasPrefix(input, "/") {
-			commands.HandleCommand(input, &history, cfg, apiClient)
+			commands.HandleCommand(input, history, cfg, apiClient)
 			continue
 		}
 

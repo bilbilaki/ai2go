@@ -70,3 +70,4 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 		fmt.Printf("Unknown command: %s. Type /help for available commands.\n", command)
 	}
 }
+
