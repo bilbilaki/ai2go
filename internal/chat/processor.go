@@ -56,10 +56,9 @@ func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Con
 				// Show the result to the user
 				if err != nil {
 					fmt.Printf("\033[31m[Error]\033[0m %v\n", err)
+					history.AddToolResponse(tCall.ID, fmt.Sprintf("Error: %v", err))
 				}
 				fmt.Printf("\033[32m[Output]\033[0m\n%s\n----------------\n", output)
-
-				// Add result to history
 				history.AddToolResponse(tCall.ID, output)
 			}
 		}
