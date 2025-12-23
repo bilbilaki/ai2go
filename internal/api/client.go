@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/terminal-assistant/internal/config"
+	"github.com/bilbilaki/ai2go/internal/config"
 )
 
 type Client struct {

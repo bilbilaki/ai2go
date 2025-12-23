@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/yourusername/terminal-assistant/internal/api"
-	"github.com/yourusername/terminal-assistant/internal/chat"
-	"github.com/yourusername/terminal-assistant/internal/config"
+	"github.com/bilbilaki/ai2go/internal/api"
+	"github.com/bilbilaki/ai2go/internal/chat"
+	"github.com/bilbilaki/ai2go/internal/config"
 )
 
 func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiClient *api.Client) {

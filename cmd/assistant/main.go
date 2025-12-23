@@ -6,11 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/yourusername/terminal-assistant/internal/api"
-	"github.com/yourusername/terminal-assistant/internal/chat"
-	"github.com/yourusername/terminal-assistant/internal/commands"
-	"github.com/yourusername/terminal-assistant/internal/config"
-	"github.com/yourusername/terminal-assistant/internal/tools"
+	"github.com/bilbilaki/ai2go/internal/api"
+	"github.com/bilbilaki/ai2go/internal/chat"
+	"github.com/bilbilaki/ai2go/internal/commands"
+	"github.com/bilbilaki/ai2go/internal/config"
+	"github.com/bilbilaki/ai2go/internal/tools"
 )
 
 func main() {
