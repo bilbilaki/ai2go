@@ -28,9 +28,10 @@ func main() {
 	fmt.Println("\n" + strings.Repeat("=", 50))
 
 	history := chat.NewHistory(cfg.CurrentModel)
-
-	cliTool := tools.GetCLITool()
-	toolsList := []api.Tool{cliTool}
+cliTool := tools.GetCLITool()
+	readTool := tools.GetReadFileTool()   // <--- New
+	patchTool := tools.GetPatchFileTool() // <--- New
+toolsList := []api.Tool{cliTool, readTool, patchTool}
 	apiClient := api.NewClient(cfg)
 	scanner := bufio.NewScanner(os.Stdin)
 

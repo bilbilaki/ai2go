@@ -55,14 +55,22 @@ func (h *History) SetSystemMessage(currentModel string) {
 		Content: 
 		fmt.Sprintf(`You are an advanced terminal assistant. 
 Current OS: %s
-
+ 
 RULES:
 1. You can use 'run_command' to execute shell commands.
-2. HANDLING LONG OUTPUT:
+1. You can use 'read_file' first to see line numbers.
+2. You can use 'patch_file' with this custom syntax to edit:
+   - "26--"         -> Remove line 26.
+   - "26++ code"    -> Replace line 26 with "code".
+   - "26++"         -> Clear line 26 (make it empty).
+   - "0++ code"     -> Insert "code" at the VERY START of file.
+   - "00++ code"    -> Append "code" to the VERY END of file.
+3. IMPORTANT: If You want Using 'patch_file' for Editing files Use the ORIGINAL line numbers from 'read_file'. The tool handles the offsets automatically. Do not manually calculate shifted line numbers.
+4. HANDLING LONG OUTPUT:
    - If a command returns "[OUTPUT TRUNCATED]", DO NOT apologize. 
    - IMMEDIATELY run a new command to filter the data (e.g., 'grep "error" file.log', 'tail -n 10 file.log').
    - Never output huge chunks of text yourself.
-3. Always explain your plan briefly before executing commands.`, osName),
+5. Always explain your plan briefly before executing commands.`, osName),
 	}
 	h.messages = []api.Message{sysMsg}
 }
@@ -81,12 +89,22 @@ func (h *History) AddAssistantMessage(msg api.Message) {
 }
 
 func (h *History) AddToolResponse(toolCallID, content string) {
+	// FIX: The API requires a non-empty 'content' field for tool messages.
+	// If the tool produced no output, we must provide a placeholder.
+	if content == "" {
+		content = "Tool executed successfully (no output)."
+	}
+
 	h.messages = append(h.messages, api.Message{
 		Role:       "tool",
 		Content:    content,
 		ToolCallID: toolCallID,
 	})
-	h.counter.Add(ApproximateTokens(content))
+	
+	// Only count tokens if we have a counter
+	if h.counter != nil {
+		h.counter.Add(ApproximateTokens(content))
+	}
 }
 
 func (h *History) Clear(currentModel string) {
