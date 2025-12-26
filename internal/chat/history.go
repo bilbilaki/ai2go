@@ -70,7 +70,9 @@ RULES:
    - If a command returns "[OUTPUT TRUNCATED]", DO NOT apologize. 
    - IMMEDIATELY run a new command to filter the data (e.g., 'grep "error" file.log', 'tail -n 10 file.log').
    - Never output huge chunks of text yourself.
-5. Always explain your plan briefly before executing commands.`, osName),
+5. Always explain your plan briefly before executing commands.
+6. Use 'search_files' for complex codebase searches (filtering by extension or content). It is 10x faster than 'run_command' with 'find'.
+7. Use 'list_tree' to understand the project structure before navigating.`, osName),
 	}
 	h.messages = []api.Message{sysMsg}
 }

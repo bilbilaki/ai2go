@@ -10,23 +10,63 @@ import (
 )
 
 // ReadFileWithLines returns content with line numbers (e.g., "1 | package main").
-func ReadFileWithLines(path string) (string, error) {
+
+// ReadFileWithLines returns content with line numbers (e.g., "1 | package main").
+// If lineRange is empty, reads all lines. Otherwise, use format "start-end" (e.g., "400-600").
+func ReadFileWithLines(path string, lineRange string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
 
+	var startLine, endLine int
+	
+	// Parse line range if provided
+	if lineRange != "" {
+		parts := strings.Split(lineRange, "-")
+		if len(parts) != 2 {
+			return "", fmt.Errorf("invalid line range format, use 'start-end' (e.g., '400-600')")
+		}
+		
+		var errStart, errEnd error
+		startLine, errStart = strconv.Atoi(strings.TrimSpace(parts[0]))
+		endLine, errEnd = strconv.Atoi(strings.TrimSpace(parts[1]))
+		
+		if errStart != nil || errEnd != nil || startLine < 1 || endLine < startLine {
+			return "", fmt.Errorf("invalid line range: start and end must be positive integers with start <= end")
+		}
+	} else {
+		// Read all lines: set a very large end value
+		startLine = 1
+		endLine = int(^uint(0) >> 1) // Max int value
+	}
+
 	var result strings.Builder
 	scanner := bufio.NewScanner(file)
 	lineNum := 1
+	
 	for scanner.Scan() {
-		// Format: 1 | <content>
-		result.WriteString(fmt.Sprintf("%d | %s\n", lineNum, scanner.Text()))
+		if lineNum >= startLine && lineNum <= endLine {
+			result.WriteString(fmt.Sprintf("%d | %s\n", lineNum, scanner.Text()))
+		} else if lineNum > endLine {
+			// Stop scanning once we've passed the end line
+			break
+		}
 		lineNum++
 	}
+	
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading file: %w", err)
+	}
+
+	if result.Len() == 0 {
+		return "", fmt.Errorf("no lines found in range %d-%d", startLine, endLine)
+	}
+
 	return result.String(), nil
 }
+
 
 // ApplyFilePatch applies the custom "26++" / "26--" syntax.
 // It uses original line numbers to ensure stability.

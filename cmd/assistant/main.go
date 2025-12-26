@@ -31,7 +31,9 @@ func main() {
 cliTool := tools.GetCLITool()
 	readTool := tools.GetReadFileTool()   // <--- New
 	patchTool := tools.GetPatchFileTool() // <--- New
-toolsList := []api.Tool{cliTool, readTool, patchTool}
+	searchTool:= tools.GetSearchFilesTool()
+	fileTreeTool := tools.GetListTreeTool()
+toolsList := []api.Tool{cliTool, readTool, patchTool,searchTool,fileTreeTool}
 	apiClient := api.NewClient(cfg)
 	scanner := bufio.NewScanner(os.Stdin)
 
