@@ -3,6 +3,7 @@ package tools
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strconv"
@@ -11,6 +12,22 @@ import (
 
 // ReadFileWithLines returns content with line numbers (e.g., "1 | package main").
 func ReadFileWithLines(path string) (string, error) {
+	sampleFile, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file: %w", err)
+	}
+	sample := make([]byte, 8192)
+	n, readErr := sampleFile.Read(sample)
+	_ = sampleFile.Close()
+	if readErr != nil && readErr != io.EOF {
+		return "", fmt.Errorf("failed to inspect file: %w", readErr)
+	}
+	sample = sample[:n]
+
+	if looksBinary(sample) {
+		return fmt.Sprintf("Refused to read %s: detected binary/non-text content. Use tools like 'file', 'strings', or targeted commands.", path), nil
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
@@ -19,12 +36,58 @@ func ReadFileWithLines(path string) (string, error) {
 
 	var result strings.Builder
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNum := 1
+	totalChars := 0
+	lineLimited := false
+	charLimited := false
 	for scanner.Scan() {
+		if lineNum > maxReadFileLines {
+			lineLimited = true
+			break
+		}
+
+		line := sanitizeText(scanner.Text())
+		lineChars := len([]rune(line))
+		if totalChars+lineChars > maxReadFileChars {
+			remaining := maxReadFileChars - totalChars
+			if remaining > 0 {
+				runes := []rune(line)
+				if remaining < len(runes) {
+					line = string(runes[:remaining])
+				}
+				result.WriteString(fmt.Sprintf("%d | %s\n", lineNum, line))
+				totalChars += len([]rune(line))
+				lineNum++
+			}
+			charLimited = true
+			break
+		}
+
 		// Format: 1 | <content>
-		result.WriteString(fmt.Sprintf("%d | %s\n", lineNum, scanner.Text()))
+		result.WriteString(fmt.Sprintf("%d | %s\n", lineNum, line))
+		totalChars += lineChars
 		lineNum++
 	}
+
+	if err := scanner.Err(); err != nil {
+		if err == bufio.ErrTooLong {
+			result.WriteString(fmt.Sprintf("\n... [READ TRUNCATED: line too long while reading %s] ...\n", path))
+			return result.String(), nil
+		}
+		if err != io.EOF {
+			return "", fmt.Errorf("failed to read file: %w", err)
+		}
+	}
+
+	if lineLimited || charLimited {
+		result.WriteString(truncationNotice(path, lineNum-1, totalChars, lineLimited, charLimited))
+	}
+
+	if strings.TrimSpace(result.String()) == "" {
+		return "(Empty text file)", nil
+	}
+
 	return result.String(), nil
 }
 
@@ -37,7 +100,7 @@ func ApplyFilePatch(path, patchContent string) (string, error) {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 	originalLines := strings.Split(string(content), "\n")
-	
+
 	// Fix split edge case: if file ends with newline, Split gives an empty string at the end.
 	if len(originalLines) > 0 && originalLines[len(originalLines)-1] == "" {
 		originalLines = originalLines[:len(originalLines)-1]
@@ -56,10 +119,14 @@ func ApplyFilePatch(path, patchContent string) (string, error) {
 	scanner := bufio.NewScanner(strings.NewReader(patchContent))
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.TrimSpace(line) == "" { continue }
-		
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
 		matches := re.FindStringSubmatch(line)
-		if len(matches) < 3 { continue }
+		if len(matches) < 3 {
+			continue
+		}
 
 		target := matches[1] // Line number, "0", or "00"
 		operator := matches[2]
@@ -83,7 +150,7 @@ func ApplyFilePatch(path, patchContent string) (string, error) {
 	// Process Original Lines
 	for i, line := range originalLines {
 		lineNumStr := strconv.Itoa(i + 1)
-		
+
 		if op, ok := ops[lineNumStr]; ok {
 			if op.Type == "delete" {
 				continue // Skip this line

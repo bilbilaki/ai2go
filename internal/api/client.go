@@ -3,7 +3,9 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bilbilaki/ai2go/internal/config"
+	"github.com/bilbilaki/ai2go/internal/ui"
 )
 
 type Client struct {
@@ -79,7 +82,11 @@ func (c *Client) GetAvailableModels() ([]Model, error) {
 	return modelsResp.Data, nil
 }
 
-func (c *Client) RunCompletion(history []Message, tools []Tool, model string) (Message, error) {
+func (c *Client) RunCompletion(ctx context.Context, history []Message, tools []Tool, model string) (Message, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	reqBody, err := json.Marshal(ChatRequest{
 		Model:    model,
 		Messages: history,
@@ -90,7 +97,7 @@ func (c *Client) RunCompletion(history []Message, tools []Tool, model string) (M
 		return Message{}, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.config.BaseURL+"/v1/chat/completions", bytes.NewBuffer(reqBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.config.BaseURL+"/v1/chat/completions", bytes.NewBuffer(reqBody))
 	if err != nil {
 		return Message{}, fmt.Errorf("error creating request: %w", err)
 	}
@@ -108,21 +115,29 @@ func (c *Client) RunCompletion(history []Message, tools []Tool, model string) (M
 		return Message{}, fmt.Errorf("API error %d: %s", resp.StatusCode, body)
 	}
 
-	return c.handleStreamingResponse(resp.Body)
+	return c.handleStreamingResponse(ctx, resp.Body)
 }
 
-func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
+func (c *Client) handleStreamingResponse(ctx context.Context, body io.ReadCloser) (Message, error) {
 	br := bufio.NewReader(body)
-	
+
 	var fullMessage Message
 	fullMessage.Role = "assistant"
-	
+
 	toolCallIndices := make(map[int]*ToolCall)
 	currentToolCallIndex := -1
+	printedAssistantPrefix := false
 
 	for {
+		if ctx.Err() != nil {
+			return Message{}, ctx.Err()
+		}
+
 		line, err := br.ReadString('\n')
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+				return Message{}, context.Canceled
+			}
 			if err != io.EOF {
 				return Message{}, fmt.Errorf("stream error: %w", err)
 			}
@@ -141,7 +156,11 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 				for _, choice := range chunk.Choices {
 					// Handle Text Content
 					if choice.Delta.Content != "" {
-						fmt.Print(choice.Delta.Content)
+						if !printedAssistantPrefix {
+							fmt.Print("\n" + ui.AssistantPrefix())
+							printedAssistantPrefix = true
+						}
+						fmt.Print(ui.Model(choice.Delta.Content))
 						fullMessage.Content += choice.Delta.Content
 					}
 
@@ -149,7 +168,7 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 					for i, tcChunk := range choice.Delta.ToolCalls {
 						idx := i
 						currentToolCallIndex = idx
-						
+
 						if _, exists := toolCallIndices[idx]; !exists {
 							toolCallIndices[idx] = &ToolCall{
 								ID:       tcChunk.ID,
@@ -157,16 +176,27 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 								Function: FunctionCall{},
 							}
 						}
-						
+
 						// Append fragments
-						if tcChunk.ID != "" { toolCallIndices[idx].ID = tcChunk.ID }
-						if tcChunk.Type != "" { toolCallIndices[idx].Type = tcChunk.Type }
-						if tcChunk.Function.Name != "" { toolCallIndices[idx].Function.Name += tcChunk.Function.Name }
-						if tcChunk.Function.Arguments != "" { toolCallIndices[idx].Function.Arguments += tcChunk.Function.Arguments }
+						if tcChunk.ID != "" {
+							toolCallIndices[idx].ID = tcChunk.ID
+						}
+						if tcChunk.Type != "" {
+							toolCallIndices[idx].Type = tcChunk.Type
+						}
+						if tcChunk.Function.Name != "" {
+							toolCallIndices[idx].Function.Name += tcChunk.Function.Name
+						}
+						if tcChunk.Function.Arguments != "" {
+							toolCallIndices[idx].Function.Arguments += tcChunk.Function.Arguments
+						}
 					}
 				}
 			}
 		}
+	}
+	if printedAssistantPrefix {
+		fmt.Println()
 	}
 
 	// Reassemble tool calls into the final message

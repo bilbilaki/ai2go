@@ -9,13 +9,16 @@ import (
 // ExecuteShellCommand runs a command cross-platform.
 // It uses 'prepareCommand' (defined in os_*.go files) to handle OS differences.
 func ExecuteShellCommand(ctx context.Context, command string) (string, error) {
-	
+
 	// 1. Get the OS-specific command struct
 	cmd := prepareCommand(ctx, command)
 
 	// 2. Run it
 	output, err := cmd.CombinedOutput()
-	result := string(output)
+	result := sanitizeText(string(output))
+	if looksBinary(output) {
+		result = "[Command output suppressed: binary/non-text data detected. Use a filtered/text command to inspect specific parts.]"
+	}
 
 	// 3. Handle Interrupts
 	if ctx.Err() == context.Canceled {
@@ -35,10 +38,10 @@ func ExecuteShellCommand(ctx context.Context, command string) (string, error) {
 	maxLength := 4000
 	if len(result) > maxLength {
 		truncatedLen := len(result) - maxLength
-		result = result[:maxLength] + 
+		result = result[:maxLength] +
 			fmt.Sprintf("\n\n... [OUTPUT TRUNCATED - %d more characters] ...\n"+
-			"SYSTEM HINT: The output is too long. DO NOT ask the user to read it.\n"+
-			"INSTEAD: Run the command again using filters (like 'grep' on Linux or 'findstr' on Windows).", truncatedLen)
+				"SYSTEM HINT: The output is too long. DO NOT ask the user to read it.\n"+
+				"INSTEAD: Run the command again using filters (like 'grep' on Linux or 'findstr' on Windows).", truncatedLen)
 	}
 
 	return result, nil

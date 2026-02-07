@@ -1,80 +1,127 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"fmt"
-	"os"
+	"io"
+	"path/filepath"
 	"strings"
+	"syscall"
+
 	"github.com/bilbilaki/ai2go/internal/api"
 	"github.com/bilbilaki/ai2go/internal/chat"
 	"github.com/bilbilaki/ai2go/internal/commands"
 	"github.com/bilbilaki/ai2go/internal/config"
 	"github.com/bilbilaki/ai2go/internal/tools"
+	"github.com/bilbilaki/ai2go/internal/ui"
 	"github.com/bilbilaki/ai2go/internal/utils" // Import the new utils package
+	"github.com/chzyer/readline"
+	"os"
+	"os/signal"
 )
 
 func main() {
 	// Load configuration
 	cfg := config.Load()
 
-	fmt.Println("\n=== Terminal Assistant with Model Switching ===")
+	fmt.Println(ui.System("\n=== Terminal Assistant with Model Switching ==="))
 	commands.ShowHelp()
 	if cfg.FirstSetup {
-		fmt.Println("\n\033[1;33mWelcome! For first setup, run /setup.\033[0m")
+		fmt.Println(ui.Warn("\nWelcome! For first setup, run /setup."))
 	}
 	if !cfg.FirstSetup {
-		fmt.Println("\nCurrent model:", cfg.CurrentModel)
+		fmt.Println("\nCurrent model:", ui.Name(cfg.CurrentModel))
 	}
-	fmt.Println("\n" + strings.Repeat("=", 50))
+	fmt.Println("\n" + ui.System(strings.Repeat("=", 50)))
 
-	history := chat.NewHistory(cfg.CurrentModel)
-cliTool := tools.GetCLITool()
+	store, history, err := chat.NewThreadStore(cfg.CurrentModel)
+	if err != nil {
+		fmt.Println(ui.Error(fmt.Sprintf("Failed to load thread store: %v", err)))
+		return
+	}
+	fmt.Printf("Active thread: %s (%s)\n", ui.Thread(store.ActiveThreadTitle()), store.ActiveThreadID())
+
+	cliTool := tools.GetCLITool()
 	readTool := tools.GetReadFileTool()   // <--- New
 	patchTool := tools.GetPatchFileTool() // <--- New
-toolsList := []api.Tool{cliTool, readTool, patchTool}
+	toolsList := []api.Tool{cliTool, readTool, patchTool}
 	apiClient := api.NewClient(cfg)
-	scanner := bufio.NewScanner(os.Stdin)
+
+	homeDir, _ := os.UserHomeDir()
+	historyPath := filepath.Join(homeDir, ".config", "ai2go", "input_history.txt")
+	_ = os.MkdirAll(filepath.Dir(historyPath), 0755)
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          ui.Prompt(history.GetTotalTokens(), cfg.CurrentModel, store.ActiveThreadTitle()),
+		AutoComplete:    commands.NewAutoCompleter(),
+		HistoryFile:     historyPath,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		fmt.Println(ui.Error(fmt.Sprintf("Failed to initialize terminal UI: %v", err)))
+		return
+	}
+	defer rl.Close()
 
 	for {
-		tokens := history.GetTotalTokens()
-		fmt.Printf("Tokens: %d (±50) > ", tokens)
-		if !scanner.Scan() {
+		rl.SetPrompt(ui.Prompt(history.GetTotalTokens(), cfg.CurrentModel, store.ActiveThreadTitle()))
+		line, err := rl.Readline()
+		if err == readline.ErrInterrupt {
+			fmt.Println(ui.Warn("Input canceled."))
+			continue
+		}
+		if err == io.EOF {
+			fmt.Println(ui.System("Goodbye!"))
 			break
 		}
+		if err != nil {
+			fmt.Println(ui.Error(fmt.Sprintf("Input error: %v", err)))
+			continue
+		}
 
-		input := strings.TrimSpace(scanner.Text())
+		input := strings.TrimSpace(line)
 		if input == "" {
-			
 			continue
 		}
 
 		// Handle special commands
 		if strings.HasPrefix(input, "/") && !strings.Contains(input, "/file") {
-			commands.HandleCommand(input, history, cfg, apiClient)
+			commands.HandleCommand(input, history, store, cfg, apiClient)
 			continue
 		}
-		
+
 		if input == "exit" || input == "quit" {
-			fmt.Println("Goodbye!")
+			fmt.Println(ui.System("Goodbye!"))
 			break
 		}
-finalMessage := input
+		finalMessage := input
 
 		// Check if we need to resolve files OR if the user just wants to type more
 		for {
 			// If the current chunk has /file, resolve it immediately
 			if strings.Contains(finalMessage, "/file") {
 				finalMessage = utils.ResolveFileTokens(finalMessage)
-				
+
 				// Show status
 				fmt.Println("\n\033[36m[Draft Mode] File attached.\033[0m")
 				fmt.Println("\033[90mCurrent message length:", len(finalMessage), "characters.\033[0m")
 				fmt.Println("Type more to append to this message, or press [ENTER] to send to AI.")
-				
+
 				// Wait for more input
-				fmt.Print(">> ") 
-				if !scanner.Scan() { break }
-				appendInput := scanner.Text() // allow leading spaces
+				rl.SetPrompt(ui.System("draft> "))
+				appendInput, readErr := rl.Readline()
+				if readErr == readline.ErrInterrupt {
+					fmt.Println(ui.Warn("Draft input canceled."))
+					break
+				}
+				if readErr == io.EOF {
+					fmt.Println(ui.System("Goodbye!"))
+					return
+				}
+				if readErr != nil {
+					fmt.Println(ui.Error(fmt.Sprintf("Input error: %v", readErr)))
+					break
+				}
 
 				if strings.TrimSpace(appendInput) == "" {
 					// User hit Enter on empty line -> Send it!
@@ -93,6 +140,12 @@ finalMessage := input
 
 		// 4. Send to AI
 		history.AddUserMessage(finalMessage)
-		chat.ProcessConversation(history, toolsList, cfg, apiClient)
+		runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		fmt.Println(ui.System("Press Ctrl+C to stop current response/tools."))
+		chat.ProcessConversation(runCtx, history, toolsList, cfg, apiClient)
+		stop()
+		if err := store.SyncActiveHistory(history); err != nil {
+			fmt.Println(ui.Error(fmt.Sprintf("Warning: failed to persist thread history: %v", err)))
+		}
 	}
 }

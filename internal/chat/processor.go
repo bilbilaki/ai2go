@@ -4,21 +4,40 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/bilbilaki/ai2go/internal/api"
 	"github.com/bilbilaki/ai2go/internal/config"
 	"github.com/bilbilaki/ai2go/internal/tools"
+	"github.com/bilbilaki/ai2go/internal/ui"
 )
 
-func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Config, apiClient *api.Client) {
+func ProcessConversation(ctx context.Context, history *History, toolsList []api.Tool, cfg *config.Config, apiClient *api.Client) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	for {
-		assistantMsg, err := apiClient.RunCompletion(history.GetMessages(), toolsList, cfg.CurrentModel)
+		if ctx.Err() != nil {
+			fmt.Println(ui.Warn("[System] Current run stopped."))
+			return
+		}
+
+		msgs, changed := history.GetMessagesForAPI()
+		if changed {
+			fmt.Println(ui.Warn("[History Repair] Removed invalid tool messages from current thread."))
+			history.LoadMessages(msgs, cfg.CurrentModel)
+		}
+
+		assistantMsg, err := apiClient.RunCompletion(ctx, msgs, toolsList, cfg.CurrentModel)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				fmt.Println(ui.Warn("[System] Request canceled by user."))
+				return
+			}
 			fmt.Printf("\nError during completion: %v\n", err)
 			return
 		}
@@ -32,155 +51,129 @@ func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Con
 
 		// Process tool calls
 		for _, tCall := range assistantMsg.ToolCalls {
-
-			if tCall.Function.Name == "run_command" {
-				// Parse the JSON arguments string to get the command
+			toolResponse := ""
+			switch tCall.Function.Name {
+			case "run_command":
 				var args map[string]string
-				json.Unmarshal([]byte(tCall.Function.Arguments), &args)
-				cmdToRun := args["command"]
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for run_command: %v", err)
+					break
+				}
+				cmdToRun := strings.TrimSpace(args["command"])
+				if cmdToRun == "" {
+					toolResponse = "Error: run_command requires a non-empty 'command' argument."
+					break
+				}
 
-				// Check auto-accept
 				if !cfg.AutoAccept {
-					fmt.Printf("\n\033[33m[Tool Request] Command: %s\033[0m\n", cmdToRun)
+					fmt.Printf("\n%s\n", ui.Tool(fmt.Sprintf("[Tool Request] Command: %s", cmdToRun)))
 					fmt.Print("Allow execution? (y/n): ")
 					confirmScanner := bufio.NewScanner(os.Stdin)
 					confirmScanner.Scan()
 					if strings.ToLower(strings.TrimSpace(confirmScanner.Text())) != "y" {
 						fmt.Println("Execution denied.")
-						history.AddToolResponse(tCall.ID, "User denied permission to execute this command.")
-						continue
+						toolResponse = "User denied permission to execute this command."
+						break
 					}
 				} else {
-					fmt.Printf("\n\033[33m[Auto-Running] Command: %s\033[0m\n", cmdToRun)
+					fmt.Printf("\n%s\n", ui.Tool(fmt.Sprintf("[Auto-Running] Command: %s", cmdToRun)))
 				}
-				ctx, cancel := context.WithCancel(context.Background())
 
-				// 2. Setup signal channel to listen for Ctrl+C
-				sigChan := make(chan os.Signal, 1)
-				signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-				// 3. Start a goroutine to watch for the signal
-				go func() {
-					select {
-					case <-sigChan:
-						fmt.Println("\n\033[31m!!! Stopping command... !!!\033[0m")
-						cancel() // Cancels the context passed to ExecuteShellCommand
-					case <-ctx.Done():
-						// Command finished normally
-					}
-				}()
-
-				// 4. Execute the command with the context
 				output, err := tools.ExecuteShellCommand(ctx, cmdToRun)
 
-				// 5. Cleanup: Stop listening for signals and ensure context is cancelled
-				signal.Stop(sigChan)
-				cancel()
-
-				// Show the result to the user
 				if err != nil {
 					fmt.Printf("\033[31m[Error]\033[0m %v\n", err)
-					history.AddToolResponse(tCall.ID, fmt.Sprintf("Error: %v", err))
+					if strings.TrimSpace(output) == "" {
+						toolResponse = fmt.Sprintf("Error: %v", err)
+					} else {
+						toolResponse = fmt.Sprintf("%s\n\nError: %v", output, err)
+					}
+				} else {
+					toolResponse = output
 				}
-				fmt.Printf("\033[32m[Output]\033[0m\n%s\n----------------\n", output)
-				history.AddToolResponse(tCall.ID, output)
-			}
-			if tCall.Function.Name == "read_file" {
-				// Check auto-accept
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), output)
+
+			case "read_file":
 				var args map[string]string
-				json.Unmarshal([]byte(tCall.Function.Arguments), &args)
-				cmdToRun := args["path"]
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for read_file: %v", err)
+					break
+				}
+				pathToRead := strings.TrimSpace(args["path"])
+				if pathToRead == "" {
+					toolResponse = "Error: read_file requires a non-empty 'path' argument."
+					break
+				}
 
 				if !cfg.AutoAccept {
-					fmt.Printf("\n\033[33m[Tool Request] reading file: %s\033[0m\n", cmdToRun)
+					fmt.Printf("\n%s\n", ui.Tool(fmt.Sprintf("[Tool Request] read file: %s", pathToRead)))
 					fmt.Print("Allow reading file? (y/n): ")
 					confirmScanner := bufio.NewScanner(os.Stdin)
 					confirmScanner.Scan()
 					if strings.ToLower(strings.TrimSpace(confirmScanner.Text())) != "y" {
 						fmt.Println("reading file denied.")
-						history.AddToolResponse(tCall.ID, "User denied permission to reading.")
-						continue
+						toolResponse = "User denied permission to read this file."
+						break
 					}
 				} else {
-					fmt.Printf("\n\033[33m[Auto-Running] reading file: %s\033[0m\n", cmdToRun)
+					fmt.Printf("\n%s\n", ui.Tool(fmt.Sprintf("[Auto-Running] read file: %s", pathToRead)))
 				}
-				ctx, cancel := context.WithCancel(context.Background())
 
-				// 2. Setup signal channel to listen for Ctrl+C
-				sigChan := make(chan os.Signal, 1)
-				signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-				// 3. Start a goroutine to watch for the signal
-				go func() {
-					select {
-					case <-sigChan:
-						fmt.Println("\n\033[31m!!! Stopping AI tool... !!!\033[0m")
-						cancel() // Cancels the context passed to ExecuteShellCommand
-					case <-ctx.Done():
-						// Command finished normally
-					}
-				}()
-				output, err := tools.ReadFileWithLines(cmdToRun)
-
-				// 5. Cleanup: Stop listening for signals and ensure context is cancelled
-				signal.Stop(sigChan)
-				cancel()
-
-				// Show the result to the user
+				output, err := tools.ReadFileWithLines(pathToRead)
 				if err != nil {
 					fmt.Printf("\033[31m[Error]\033[0m %v\n", err)
-					history.AddToolResponse(tCall.ID, fmt.Sprintf("Error: %v", err))
+					toolResponse = fmt.Sprintf("Error: %v", err)
+				} else {
+					toolResponse = output
 				}
-				fmt.Printf("\033[32m[Output]\033[0m\n%s\n----------------\n", output)
-				history.AddToolResponse(tCall.ID, output)
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), output)
 
-			}
-			if tCall.Function.Name == "patch_file" {
+			case "patch_file":
 				var args map[string]string
-				json.Unmarshal([]byte(tCall.Function.Arguments), &args)
-				cmdToRun := args["path"]
-				cmdToPatch := args["patch"]
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for patch_file: %v", err)
+					break
+				}
+				pathToPatch := strings.TrimSpace(args["path"])
+				patch := args["patch"]
+				if pathToPatch == "" {
+					toolResponse = "Error: patch_file requires a non-empty 'path' argument."
+					break
+				}
+				if strings.TrimSpace(patch) == "" {
+					toolResponse = "Error: patch_file requires a non-empty 'patch' argument."
+					break
+				}
+
 				if !cfg.AutoAccept {
-					fmt.Printf("\n\033[33m[Tool Request] Edit File: %s\033[0m\n", cmdToRun)
+					fmt.Printf("\n%s\n", ui.Tool(fmt.Sprintf("[Tool Request] Edit File: %s", pathToPatch)))
 					fmt.Print("Allow Edit File? (y/n): ")
 					confirmScanner := bufio.NewScanner(os.Stdin)
 					confirmScanner.Scan()
 					if strings.ToLower(strings.TrimSpace(confirmScanner.Text())) != "y" {
 						fmt.Println("Edit File denied.")
-						history.AddToolResponse(tCall.ID, "User denied permission to Edit this File.")
-						continue
+						toolResponse = "User denied permission to edit this file."
+						break
 					}
 				} else {
-					fmt.Printf("\n\033[33m[Auto-Running] Edit File: %s\033[0m\n", cmdToRun)
+					fmt.Printf("\n%s\n", ui.Tool(fmt.Sprintf("[Auto-Running] Edit File: %s", pathToPatch)))
 				}
-				ctx, cancel := context.WithCancel(context.Background())
 
-				// 2. Setup signal channel to listen for Ctrl+C
-				sigChan := make(chan os.Signal, 1)
-				signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-				// 3. Start a goroutine to watch for the signal
-				go func() {
-					select {
-					case <-sigChan:
-						fmt.Println("\n\033[31m!!! Stopping AI Tool... !!!\033[0m")
-						cancel() // Cancels the context passed to ExecuteShellCommand
-					case <-ctx.Done():
-						// Command finished normally
-					}
-				}()
-
-				fmt.Printf("\n\033[33m[Tool] Patching file: %s\033[0m\n", args["path"])
-				output, err := tools.ApplyFilePatch(cmdToRun, cmdToPatch)
-
-				// Common output handling
+				fmt.Printf("\n%s\n", ui.Tool(fmt.Sprintf("[Tool] Patching file: %s", pathToPatch)))
+				output, err := tools.ApplyFilePatch(pathToPatch, patch)
 				if err != nil {
 					fmt.Printf("\033[31m[Error]\033[0m %v\n", err)
-					history.AddToolResponse(tCall.ID, fmt.Sprintf("Error: %v", err))
+					toolResponse = fmt.Sprintf("Error: %v", err)
+				} else {
+					toolResponse = output
 				}
-				fmt.Printf("\033[32m[Output]\033[0m\n%s\n----------------\n", output)
-				history.AddToolResponse(tCall.ID, output)
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), output)
+
+			default:
+				toolResponse = fmt.Sprintf("Error: unsupported tool '%s'", tCall.Function.Name)
 			}
+
+			history.AddToolResponse(tCall.ID, toolResponse)
 		}
 	}
 }
