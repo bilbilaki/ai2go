@@ -55,7 +55,7 @@ func GetPatchFileTool() api.Tool {
 		Type: "function",
 		Function: api.ToolFunction{
 			Name:        "patch_file",
-			Description: "Edits a file using line-based patches. Syntax: 'N--' (delete), 'N++ content' (replace), '0++' (prepend), '00++' (append).",
+			Description: "Edits a file using line-based patches. Syntax: 'N--' (delete), 'N++ content' (replace), 'N<< content' (insert before), 'N>> content' (insert after), '0++/0<<' (prepend), '00++/00>>' (append). Use \\n for multi-line replacements.",
 			Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {

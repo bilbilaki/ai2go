@@ -17,45 +17,46 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 	if len(parts) == 0 {
 		return
 	}
-	
+
 	command := parts[0]
 
 	switch command {
 	case "/models", "/model":
 		HandleModelSelection(cfg, apiClient)
-		
+
 	case "/current":
 		fmt.Printf("Current model: \033[36m%s\033[0m\n", cfg.CurrentModel)
-		
+
 	case "/clear":
 		history.Clear(cfg.CurrentModel)
 		fmt.Println("\033[32mConversation history cleared.\033[0m")
-		
+
 	case "/change_url":
 		fmt.Print("Enter new Base URL: ")
 		reader := bufio.NewReader(os.Stdin)
 		newUrl, _ := reader.ReadString('\n')
 		cfg.SetBaseURL(strings.TrimSpace(newUrl))
 		fmt.Println("Base URL updated!")
-		
+
 	case "/change_apikey":
 		fmt.Print("Enter new API Key: ")
 		reader := bufio.NewReader(os.Stdin)
 		newKey, _ := reader.ReadString('\n')
 		cfg.SetAPIKey(strings.TrimSpace(newKey))
 		fmt.Println("API Key updated!")
-		
+
 	case "/proxy":
 		fmt.Print("Enter proxy URL (leave blank to disable): ")
 		reader := bufio.NewReader(os.Stdin)
 		newProxy, _ := reader.ReadString('\n')
 		cfg.SetProxyURL(strings.TrimSpace(newProxy))
+		apiClient.Reload()
 		if cfg.ProxyURL == "" {
 			fmt.Println("Proxy disabled!")
 		} else {
 			fmt.Println("Proxy updated!")
 		}
-		
+
 	case "/autoaccept":
 		cfg.ToggleAutoAccept()
 		status := "OFF"
@@ -63,7 +64,7 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 			status = "ON"
 		}
 		fmt.Printf("Auto-accept commands is now: %s\n", status)
-		case "/summarize":
+	case "/summarize":
 		fmt.Println("\n\033[33mGenerating session summary...\033[0m")
 
 		// 1. Prepare the prompt and sanitized history
@@ -72,7 +73,7 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 			"Focus on the user's goals, key commands executed, and important context. " +
 			"Ignore specific details of long tool outputs (represented as 'toolcall successfully done'). " +
 			"Be concise but comprehensive."
-		
+
 		msgs = append(msgs, api.Message{
 			Role:    "user",
 			Content: prompt,
@@ -90,8 +91,8 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 		fmt.Println("\n\033[32mHistory summarized and context refreshed.\033[0m")
 	case "/help":
 		ShowHelp()
-		case "/setup":
-		HandleSetup(cfg,apiClient)
+	case "/setup":
+		HandleSetup(cfg, apiClient)
 	default:
 		fmt.Printf("Unknown command: %s. Type /help for available commands.\n", command)
 	}
