@@ -125,8 +125,8 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 	var fullMessage Message
 	fullMessage.Role = "assistant"
 
-	toolCallIndices := make(map[int]*ToolCall)
-	currentToolCallIndex := -1
+	toolCallMap := make(map[string]*ToolCall)
+	var toolCallOrder []string
 	inThinkingBlock := false
 
 	for {
@@ -169,11 +169,25 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 
 					// Handle Tool Call chunks
 					for i, tcChunk := range choice.Delta.ToolCalls {
-						idx := i
-						currentToolCallIndex = idx
+						key := tcChunk.ID
+						fallbackKey := fmt.Sprintf("idx:%d", i)
+						if key == "" {
+							key = fallbackKey
+						} else if key != fallbackKey {
+							if existing, ok := toolCallMap[fallbackKey]; ok {
+								toolCallMap[key] = existing
+								delete(toolCallMap, fallbackKey)
+								for idx, existingKey := range toolCallOrder {
+									if existingKey == fallbackKey {
+										toolCallOrder[idx] = key
+										break
+									}
+								}
+							}
+						}
 
-						if _, exists := toolCallIndices[idx]; !exists {
-							toolCallIndices[idx] = &ToolCall{
+						if _, exists := toolCallMap[key]; !exists {
+							toolCallMap[key] = &ToolCall{
 								ID:       tcChunk.ID,
 								Type:     tcChunk.Type,
 								Function: FunctionCall{},
@@ -181,18 +195,20 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 							toolCallOrder = append(toolCallOrder, key)
 						}
 
+						toolCall := toolCallMap[key]
+
 						// Append fragments
 						if tcChunk.ID != "" {
-							toolCallIndices[idx].ID = tcChunk.ID
+							toolCall.ID = tcChunk.ID
 						}
 						if tcChunk.Type != "" {
-							toolCallIndices[idx].Type = tcChunk.Type
+							toolCall.Type = tcChunk.Type
 						}
 						if tcChunk.Function.Name != "" {
-							toolCallIndices[idx].Function.Name += tcChunk.Function.Name
+							toolCall.Function.Name += tcChunk.Function.Name
 						}
 						if tcChunk.Function.Arguments != "" {
-							toolCallIndices[idx].Function.Arguments += tcChunk.Function.Arguments
+							toolCall.Function.Arguments += tcChunk.Function.Arguments
 						}
 					}
 				}
@@ -204,8 +220,8 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 	if inThinkingBlock {
 		printThinkingBlockEnd()
 	}
-	for i := 0; i <= currentToolCallIndex; i++ {
-		if tc, exists := toolCallIndices[i]; exists {
+	for _, key := range toolCallOrder {
+		if tc, exists := toolCallMap[key]; exists {
 			fullMessage.ToolCalls = append(fullMessage.ToolCalls, *tc)
 		}
 	}

@@ -118,6 +118,15 @@ func (h *History) Clear(currentModel string) {
 	h.counter.Reset()
 }
 
+func (h *History) ReplaceWithMessages(currentModel string, messages []api.Message) {
+	h.SetSystemMessage(currentModel)
+	h.counter.Reset()
+	for _, msg := range messages {
+		h.messages = append(h.messages, msg)
+		h.counter.Add(ApproximateTokens(msg.Content))
+	}
+}
+
 func (h *History) GetMessages() []api.Message {
 	return h.messages
 }

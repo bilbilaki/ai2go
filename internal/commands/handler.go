@@ -10,9 +10,11 @@ import (
 	"github.com/bilbilaki/ai2go/internal/api"
 	"github.com/bilbilaki/ai2go/internal/chat"
 	"github.com/bilbilaki/ai2go/internal/config"
+	"github.com/bilbilaki/ai2go/internal/session"
+	"github.com/bilbilaki/ai2go/internal/storage"
 )
 
-func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiClient *api.Client) {
+func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiClient *api.Client, store *storage.Store, state *session.State) {
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
 		return
@@ -30,6 +32,9 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 	case "/clear":
 		history.Clear(cfg.CurrentModel)
 		fmt.Println("\033[32mConversation history cleared.\033[0m")
+		if state != nil {
+			state.HasMessages = false
+		}
 
 	case "/change_url":
 		fmt.Print("Enter new Base URL: ")
@@ -64,6 +69,25 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 			status = "ON"
 		}
 		fmt.Printf("Auto-accept commands is now: %s\n", status)
+	case "/history":
+		HandleHistory(store)
+	case "/resume":
+		if len(parts) < 2 {
+			fmt.Println("Usage: /resume <chat_id>")
+			return
+		}
+		chatID, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			fmt.Println("Invalid chat ID.")
+			return
+		}
+		if err := ResumeChat(history, cfg.CurrentModel, store, state, chatID); err != nil {
+			fmt.Printf("Failed to resume chat: %v\n", err)
+		}
+	case "/newchat", "/new":
+		if err := StartNewChat(history, cfg.CurrentModel, store, state); err != nil {
+			fmt.Printf("Failed to start new chat: %v\n", err)
+		}
 	case "/summarize":
 		fmt.Println("\n\033[33mGenerating session summary...\033[0m")
 

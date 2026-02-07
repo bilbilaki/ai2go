@@ -44,6 +44,26 @@ func getConfigPath() (string, error) {
 	}
 	return filepath.Join(configDir, configFile), nil
 }
+
+func ConfigDir() (string, error) {
+	var dir string
+	if runtime.GOOS == "windows" {
+		dir = os.Getenv("USERPROFILE")
+		if dir == "" {
+			return "", fmt.Errorf("USERPROFILE env var not set on Windows")
+		}
+	} else {
+		dir = os.Getenv("HOME")
+		if dir == "" {
+			return "", fmt.Errorf("HOME env var not set")
+		}
+	}
+	configDir := filepath.Join(dir, appConfigDir)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create config dir: %w", err)
+	}
+	return configDir, nil
+}
 func Load() *Config {
 	cfg := &Config{
 		FirstSetup: true,

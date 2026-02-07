@@ -15,10 +15,11 @@ import (
 
 	"github.com/bilbilaki/ai2go/internal/api"
 	"github.com/bilbilaki/ai2go/internal/config"
+	"github.com/bilbilaki/ai2go/internal/storage"
 	"github.com/bilbilaki/ai2go/internal/tools"
 )
 
-func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Config, apiClient *api.Client) {
+func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Config, apiClient *api.Client, store *storage.Store, chatID int64) {
 	for {
 		assistantMsg, err := apiClient.RunCompletion(history.GetMessages(), toolsList, cfg.CurrentModel)
 		if err != nil {
@@ -27,6 +28,11 @@ func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Con
 		}
 
 		history.AddAssistantMessage(assistantMsg)
+		if store != nil && chatID != 0 {
+			if err := store.SaveMessage(chatID, assistantMsg.Role, assistantMsg.Content); err != nil {
+				fmt.Printf("\n[Warning] Failed to save assistant message: %v\n", err)
+			}
+		}
 
 		// If the AI didn't call any tools, we are done with this turn
 		if len(assistantMsg.ToolCalls) == 0 {
@@ -146,12 +152,19 @@ func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Con
 				cancel()
 
 				// Show the result to the user
+				toolContent := output
 				if err != nil {
+					toolContent = fmt.Sprintf("Error: %v", err)
 					fmt.Printf("\033[31m[Error]\033[0m %v\n", err)
-					history.AddToolResponse(tCall.ID, fmt.Sprintf("Error: %v", err))
+					history.AddToolResponse(tCall.ID, toolContent)
 				} else {
 					fmt.Printf("\033[32m[Output]\033[0m\n%s\n----------------\n", output)
-					history.AddToolResponse(tCall.ID, output)
+					history.AddToolResponse(tCall.ID, toolContent)
+				}
+				if store != nil && chatID != 0 {
+					if err := store.SaveMessage(chatID, "tool", toolContent); err != nil {
+						fmt.Printf("\n[Warning] Failed to save tool output: %v\n", err)
+					}
 				}
 			}
 			if tCall.Function.Name == "patch_file" {
@@ -196,12 +209,19 @@ func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Con
 				output, err := tools.ApplyFilePatch(cmdToRun, cmdToPatch)
 
 				// Common output handling
+				toolContent := output
 				if err != nil {
+					toolContent = fmt.Sprintf("Error: %v", err)
 					fmt.Printf("\033[31m[Error]\033[0m %v\n", err)
-					history.AddToolResponse(tCall.ID, fmt.Sprintf("Error: %v", err))
+					history.AddToolResponse(tCall.ID, toolContent)
 				}
 				fmt.Printf("\033[32m[Output]\033[0m\n%s\n----------------\n", output)
-				history.AddToolResponse(tCall.ID, output)
+				history.AddToolResponse(tCall.ID, toolContent)
+				if store != nil && chatID != 0 {
+					if err := store.SaveMessage(chatID, "tool", toolContent); err != nil {
+						fmt.Printf("\n[Warning] Failed to save tool output: %v\n", err)
+					}
+				}
 			}
 			if tCall.Function.Name == "search_files" {
 				var args map[string]interface{}
@@ -282,11 +302,18 @@ func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Con
 				output, err := tools.SearchFilesWrapper(ctx, cfgSearch)
 				cancel()
 
+				toolContent := output
 				if err != nil {
-					history.AddToolResponse(tCall.ID, fmt.Sprintf("Error: %v", err))
+					toolContent = fmt.Sprintf("Error: %v", err)
+					history.AddToolResponse(tCall.ID, toolContent)
 				} else {
 					fmt.Printf("\033[32m[Output]\033[0m Found results.\n")
-					history.AddToolResponse(tCall.ID, output)
+					history.AddToolResponse(tCall.ID, toolContent)
+				}
+				if store != nil && chatID != 0 {
+					if err := store.SaveMessage(chatID, "tool", toolContent); err != nil {
+						fmt.Printf("\n[Warning] Failed to save tool output: %v\n", err)
+					}
 				}
 			}
 
@@ -318,10 +345,17 @@ func ProcessConversation(history *History, toolsList []api.Tool, cfg *config.Con
 
 				output, err := tools.ListTreeWrapper(cfgTree)
 
+				toolContent := output
 				if err != nil {
-					history.AddToolResponse(tCall.ID, fmt.Sprintf("Error: %v", err))
+					toolContent = fmt.Sprintf("Error: %v", err)
+					history.AddToolResponse(tCall.ID, toolContent)
 				} else {
-					history.AddToolResponse(tCall.ID, output)
+					history.AddToolResponse(tCall.ID, toolContent)
+				}
+				if store != nil && chatID != 0 {
+					if err := store.SaveMessage(chatID, "tool", toolContent); err != nil {
+						fmt.Printf("\n[Warning] Failed to save tool output: %v\n", err)
+					}
 				}
 			}
 

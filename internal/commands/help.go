@@ -12,6 +12,9 @@ func ShowHelp() {
 	fmt.Println("  \033[36m/change_apikey\033[0m  - Change API key")
 	fmt.Println("  \033[36m/proxy\033[0m          - Set proxy URL")
 	fmt.Println("  \033[36m/autoaccept\033[0m     - Toggle auto-accept for commands")
+	fmt.Println("  \033[36m/history\033[0m        - Show chat history")
+	fmt.Println("  \033[36m/resume <id>\033[0m    - Resume a previous chat")
+	fmt.Println("  \033[36m/newchat\033[0m        - Start a new chat session")
 	fmt.Println("  \033[36m/help\033[0m           - Show available commands")
 	fmt.Println("  \033[36mexit/quit\033[0m       - Exit program")
 }

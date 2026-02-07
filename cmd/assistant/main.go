@@ -3,10 +3,16 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/bilbilaki/ai2go/internal/api"
 	"github.com/bilbilaki/ai2go/internal/chat"
 	"github.com/bilbilaki/ai2go/internal/commands"
 	"github.com/bilbilaki/ai2go/internal/config"
+	"github.com/bilbilaki/ai2go/internal/session"
+	"github.com/bilbilaki/ai2go/internal/storage"
 	"github.com/bilbilaki/ai2go/internal/tools"
 	"github.com/bilbilaki/ai2go/internal/utils" // Import the new utils package
 	"os"
@@ -36,6 +42,33 @@ func main() {
 	toolsList := []api.Tool{cliTool, readTool, patchTool, searchTool, fileTreeTool}
 	apiClient := api.NewClient(cfg)
 	scanner := bufio.NewScanner(os.Stdin)
+	var store *storage.Store
+	var state session.State
+
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		fmt.Printf("\n\033[31m[Warning]\033[0m Failed to resolve config dir for history: %v\n", err)
+	} else {
+		dbPath := filepath.Join(configDir, "history.db")
+		store, err = storage.Open(dbPath)
+		if err != nil {
+			fmt.Printf("\n\033[31m[Warning]\033[0m Failed to open history database: %v\n", err)
+		} else {
+			defer store.Close()
+		}
+	}
+
+	if store != nil {
+		chatID, err := store.CreateChat("Untitled")
+		if err != nil {
+			fmt.Printf("\n\033[31m[Warning]\033[0m Failed to create initial chat: %v\n", err)
+		} else {
+			state.ChatID = chatID
+			state.Title = "Untitled"
+		}
+	} else {
+		state.Title = "Untitled"
+	}
 
 	for {
 		tokens := history.GetTotalTokens()
@@ -52,7 +85,7 @@ func main() {
 
 		// Handle special commands
 		if strings.HasPrefix(input, "/") && !strings.Contains(input, "/file") {
-			commands.HandleCommand(input, history, cfg, apiClient)
+			commands.HandleCommand(input, history, cfg, apiClient, store, &state)
 			continue
 		}
 
@@ -101,6 +134,25 @@ func main() {
 
 		// 4. Send to AI
 		history.AddUserMessage(finalMessage)
-		chat.ProcessConversation(history, toolsList, cfg, apiClient)
+		if store != nil && state.ChatID != 0 {
+			if err := store.SaveMessage(state.ChatID, "user", finalMessage); err != nil {
+				fmt.Printf("\n\033[31m[Warning]\033[0m Failed to save user message: %v\n", err)
+			}
+		}
+		if !state.HasMessages {
+			state.HasMessages = true
+			if store != nil && state.ChatID != 0 {
+				title, err := commands.GenerateChatTitle(apiClient, cfg.CurrentModel, finalMessage)
+				if err != nil || strings.TrimSpace(title) == "" {
+					title = "Untitled"
+				}
+				if err := store.UpdateChatTitle(state.ChatID, title); err != nil {
+					fmt.Printf("\n\033[31m[Warning]\033[0m Failed to update chat title: %v\n", err)
+				} else {
+					state.Title = title
+				}
+			}
+		}
+		chat.ProcessConversation(history, toolsList, cfg, apiClient, store, state.ChatID)
 	}
 }
