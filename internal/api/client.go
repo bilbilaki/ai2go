@@ -47,10 +47,18 @@ func (c *Client) initHTTPClient() {
 		}
 	}
 
+	timeout := time.Duration(c.config.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
 	c.httpClient = &http.Client{
-		Timeout:   600 * time.Second,
+		Timeout:   timeout,
 		Transport: transport,
 	}
+}
+
+func (c *Client) Reload() {
+	c.initHTTPClient()
 }
 
 func (c *Client) GetAvailableModels() ([]Model, error) {
@@ -170,6 +178,7 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 								Type:     tcChunk.Type,
 								Function: FunctionCall{},
 							}
+							toolCallOrder = append(toolCallOrder, key)
 						}
 
 						// Append fragments

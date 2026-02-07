@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,8 +15,10 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
 func SearchFilesWrapper(ctx context.Context, cfg *Config) (string, error) {
 	// Redirect stdout to capture the results
 	old := os.Stdout
@@ -73,17 +76,17 @@ const (
 
 // Config holds all CLI arguments and compiled regexes
 type Config struct {
-	RootPath          string
-	Extensions        []string
-	IncludePathRegex  []*regexp.Regexp
-	ExcludePathRegex  []*regexp.Regexp
-	IncludeNameRegex  []*regexp.Regexp
-	ExcludeNameRegex  []*regexp.Regexp
-	ContentRegex      *regexp.Regexp
-	ContentInclude    bool
-	ShowTree          bool
-	WorkerCount       int
-	Verbose           bool
+	RootPath         string
+	Extensions       []string
+	IncludePathRegex []*regexp.Regexp
+	ExcludePathRegex []*regexp.Regexp
+	IncludeNameRegex []*regexp.Regexp
+	ExcludeNameRegex []*regexp.Regexp
+	ContentRegex     *regexp.Regexp
+	ContentInclude   bool
+	ShowTree         bool
+	WorkerCount      int
+	Verbose          bool
 }
 
 // Global buffer pool to reduce GC pressure during content reading
@@ -188,6 +191,10 @@ func SetupSignalHandler(cancel context.CancelFunc) {
 	}()
 }
 
+func CompilePatterns(input string) []*regexp.Regexp {
+	return compilePatterns(input)
+}
+
 // ======================================================================================
 // PATTERN MATCHING ENGINE
 // ======================================================================================
@@ -257,13 +264,14 @@ func RunSearch(ctx context.Context, cfg *Config) {
 	pathsCh := make(chan string, 1000)
 	resultsCh := make(chan string, 1000)
 	var wg sync.WaitGroup
+	var skippedLargeFiles int64
 
 	// 1. Worker Pool
 	for i := 0; i < cfg.WorkerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			worker(ctx, cfg, pathsCh, resultsCh)
+			worker(ctx, cfg, pathsCh, resultsCh, &skippedLargeFiles)
 		}()
 	}
 
@@ -322,14 +330,17 @@ func RunSearch(ctx context.Context, cfg *Config) {
 		}
 	}()
 
-	wg.Wait()      // Wait for workers
+	wg.Wait()        // Wait for workers
 	close(resultsCh) // Signal collector
-	<-doneCh       // Wait for collector
+	<-doneCh         // Wait for collector
 
 	fmt.Printf(ColorGreen+"\nSearch completed in %v. Found %d files.\n"+ColorReset, time.Since(start), totalFound)
+	if skippedLargeFiles > 0 {
+		fmt.Printf(ColorYellow+"Warning: Skipped %d files larger than 10MB during content search.\n"+ColorReset, skippedLargeFiles)
+	}
 }
 
-func worker(ctx context.Context, cfg *Config, jobs <-chan string, results chan<- string) {
+func worker(ctx context.Context, cfg *Config, jobs <-chan string, results chan<- string, skippedLargeFiles *int64) {
 	for path := range jobs {
 		if ctx.Err() != nil {
 			return
@@ -369,6 +380,10 @@ func worker(ctx context.Context, cfg *Config, jobs <-chan string, results chan<-
 		if cfg.ContentRegex != nil {
 			matched, err := CheckFileContent(path, cfg.ContentRegex)
 			if err != nil {
+				if errors.Is(err, errContentTooLarge) {
+					atomic.AddInt64(skippedLargeFiles, 1)
+					continue
+				}
 				if cfg.Verbose {
 					fmt.Fprintf(os.Stderr, "Read error %s: %v\n", path, err)
 				}
@@ -418,7 +433,7 @@ func CheckFileContent(path string, re *regexp.Regexp) (bool, error) {
 
 	stat, _ := f.Stat()
 	if stat.Size() > 10*1024*1024 { // 10MB limit
-		return false, nil
+		return false, errContentTooLarge
 	}
 
 	// Read full content (safe for source code)
@@ -440,6 +455,8 @@ func CheckFileContent(path string, re *regexp.Regexp) (bool, error) {
 
 	return re.Match(data), nil
 }
+
+var errContentTooLarge = errors.New("file too large for content search")
 
 // ======================================================================================
 // TREE GENERATOR
@@ -469,7 +486,7 @@ func generateTree(dir string, prefix string, cfg *Config) error {
 
 	for i, e := range filtered {
 		isLast := i == len(filtered)-1
-		
+
 		connector := "├── "
 		if isLast {
 			connector = "└── "
