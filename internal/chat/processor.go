@@ -11,6 +11,7 @@ import (
 
 	"github.com/bilbilaki/ai2go/internal/api"
 	"github.com/bilbilaki/ai2go/internal/config"
+	"github.com/bilbilaki/ai2go/internal/subagent"
 	"github.com/bilbilaki/ai2go/internal/tools"
 	"github.com/bilbilaki/ai2go/internal/ui"
 )
@@ -169,6 +170,43 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 				}
 				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), output)
 
+			case "subagent_factory":
+				if !cfg.SubagentExperimental {
+					toolResponse = "Error: subagent experimental mode is OFF. Run /subagent_experimental to enable it."
+					break
+				}
+
+				input, err := subagent.ParseFactoryInput(tCall.Function.Arguments)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for subagent_factory: %v", err)
+					break
+				}
+
+				systemPrompt := extractSystemPrompt(history.GetMessages())
+				fmt.Printf("\n%s\n", ui.Tool("[Subagent] Starting subagent batch..."))
+				report, err := subagent.DefaultManager().RunFactory(ctx, apiClient, cfg.CurrentModel, systemPrompt, input, cfg.SubagentExperimental)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: subagent_factory failed: %v", err)
+				} else {
+					toolResponse = subagent.FormatBatchReport(report)
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
+			case "subagent_context_provider":
+				taskID, consume, err := subagent.ParseContextProviderInput(tCall.Function.Arguments)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for subagent_context_provider: %v", err)
+					break
+				}
+
+				output, err := subagent.DefaultManager().GetTaskContextSummary(taskID, consume)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: %v", err)
+				} else {
+					toolResponse = output
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
 			default:
 				toolResponse = fmt.Sprintf("Error: unsupported tool '%s'", tCall.Function.Name)
 			}
@@ -176,4 +214,13 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 			history.AddToolResponse(tCall.ID, toolResponse)
 		}
 	}
+}
+
+func extractSystemPrompt(messages []api.Message) string {
+	for _, msg := range messages {
+		if msg.Role == "system" && strings.TrimSpace(msg.Content) != "" {
+			return msg.Content
+		}
+	}
+	return ""
 }

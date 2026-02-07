@@ -44,7 +44,9 @@ func main() {
 	cliTool := tools.GetCLITool()
 	readTool := tools.GetReadFileTool()   // <--- New
 	patchTool := tools.GetPatchFileTool() // <--- New
-	toolsList := []api.Tool{cliTool, readTool, patchTool}
+	subagentFactoryTool := tools.GetSubagentFactoryTool()
+	subagentContextTool := tools.GetSubagentContextProviderTool()
+	toolsList := []api.Tool{cliTool, readTool, patchTool, subagentFactoryTool, subagentContextTool}
 	apiClient := api.NewClient(cfg)
 
 	homeDir, _ := os.UserHomeDir()

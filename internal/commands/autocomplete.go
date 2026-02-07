@@ -12,6 +12,7 @@ func NewAutoCompleter() *readline.PrefixCompleter {
 		readline.PcItem("/summarize"),
 		readline.PcItem("/setup"),
 		readline.PcItem("/autoaccept"),
+		readline.PcItem("/subagent_experimental"),
 		readline.PcItem("/change_url"),
 		readline.PcItem("/change_apikey"),
 		readline.PcItem("/proxy"),

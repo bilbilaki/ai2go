@@ -28,6 +28,11 @@ func HandleCommand(cmd string, history *chat.History, store *chat.ThreadStore, c
 
 	case "/current":
 		fmt.Printf("Current model: %s\n", ui.Name(cfg.CurrentModel))
+		exp := "OFF"
+		if cfg.SubagentExperimental {
+			exp = "ON"
+		}
+		fmt.Printf("Subagent experimental: %s\n", exp)
 
 	case "/clear":
 		history.Clear(cfg.CurrentModel)
@@ -74,6 +79,13 @@ func HandleCommand(cmd string, history *chat.History, store *chat.ThreadStore, c
 			status = "ON"
 		}
 		fmt.Printf("Auto-accept commands is now: %s\n", status)
+	case "/subagent_experimental":
+		cfg.ToggleSubagentExperimental()
+		status := "OFF"
+		if cfg.SubagentExperimental {
+			status = "ON"
+		}
+		fmt.Printf("Subagent experimental mode is now: %s\n", status)
 	case "/summarize":
 		fmt.Println("\n\033[33mGenerating session summary...\033[0m")
 

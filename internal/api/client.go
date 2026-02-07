@@ -118,6 +118,54 @@ func (c *Client) RunCompletion(ctx context.Context, history []Message, tools []T
 	return c.handleStreamingResponse(ctx, resp.Body)
 }
 
+func (c *Client) RunCompletionOnce(ctx context.Context, history []Message, tools []Tool, model string) (Message, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	reqBody, err := json.Marshal(ChatRequest{
+		Model:    model,
+		Messages: history,
+		Stream:   false,
+		Tools:    tools,
+	})
+	if err != nil {
+		return Message{}, fmt.Errorf("error marshaling request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.config.BaseURL+"/v1/chat/completions", bytes.NewBuffer(reqBody))
+	if err != nil {
+		return Message{}, fmt.Errorf("error creating request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return Message{}, fmt.Errorf("error contacting API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return Message{}, fmt.Errorf("API error %d: %s", resp.StatusCode, body)
+	}
+
+	var parsed ChatCompletionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return Message{}, fmt.Errorf("error decoding response: %w", err)
+	}
+	if len(parsed.Choices) == 0 {
+		return Message{}, fmt.Errorf("API returned no choices")
+	}
+
+	msg := parsed.Choices[0].Message
+	if msg.Role == "" {
+		msg.Role = "assistant"
+	}
+	return msg, nil
+}
+
 func (c *Client) handleStreamingResponse(ctx context.Context, body io.ReadCloser) (Message, error) {
 	br := bufio.NewReader(body)
 

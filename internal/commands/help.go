@@ -19,6 +19,7 @@ func ShowHelp() {
 	fmt.Println("  " + ui.HelpCommand("/change_apikey", "Change API key"))
 	fmt.Println("  " + ui.HelpCommand("/proxy", "Set proxy URL"))
 	fmt.Println("  " + ui.HelpCommand("/autoaccept", "Toggle auto-accept for commands"))
+	fmt.Println("  " + ui.HelpCommand("/subagent_experimental", "Toggle experimental subagent tool execution"))
 	fmt.Println("  " + ui.HelpCommand("/summarize", "Summarize current thread and compact context"))
 	fmt.Println("  " + ui.HelpCommand("/help", "Show available commands"))
 	fmt.Println("  " + ui.HelpCommand("exit/quit", "Exit program"))
