@@ -1,7 +1,7 @@
 package commands
 
 import (
-"encoding/json"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -61,6 +61,7 @@ func HandleModelSelection(cfg *config.Config, apiClient *api.Client) {
 	cfg.SetCurrentModel(selectedModel)
 	fmt.Printf("\033[32m✓ Model switched to: %s\033[0m\n", selectedModel)
 }
+
 type Tool struct {
 	Type     string       `json:"type"`
 	Function ToolFunction `json:"function"`
@@ -99,6 +100,8 @@ type ChatRequest struct {
 
 type Delta struct {
 	Content   string     `json:"content"`
+	Thinking  string     `json:"thinking,omitempty"`
+	Reasoning string     `json:"reasoning,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
