@@ -113,12 +113,13 @@ func (c *Client) RunCompletion(history []Message, tools []Tool, model string) (M
 
 func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 	br := bufio.NewReader(body)
-	
+
 	var fullMessage Message
 	fullMessage.Role = "assistant"
-	
+
 	toolCallIndices := make(map[int]*ToolCall)
 	currentToolCallIndex := -1
+	inThinkingBlock := false
 
 	for {
 		line, err := br.ReadString('\n')
@@ -139,8 +140,21 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 			var chunk StreamChunk
 			if json.Unmarshal([]byte(data), &chunk) == nil {
 				for _, choice := range chunk.Choices {
+					// Handle Thinking/Reasoning Content
+					if choice.Delta.Thinking != "" || choice.Delta.Reasoning != "" {
+						if !inThinkingBlock {
+							printThinkingBlockStart()
+							inThinkingBlock = true
+						}
+						printThinkingContent(choice.Delta.Thinking + choice.Delta.Reasoning)
+					}
+
 					// Handle Text Content
 					if choice.Delta.Content != "" {
+						if inThinkingBlock {
+							printThinkingBlockEnd()
+							inThinkingBlock = false
+						}
 						fmt.Print(choice.Delta.Content)
 						fullMessage.Content += choice.Delta.Content
 					}
@@ -149,7 +163,7 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 					for i, tcChunk := range choice.Delta.ToolCalls {
 						idx := i
 						currentToolCallIndex = idx
-						
+
 						if _, exists := toolCallIndices[idx]; !exists {
 							toolCallIndices[idx] = &ToolCall{
 								ID:       tcChunk.ID,
@@ -157,12 +171,20 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 								Function: FunctionCall{},
 							}
 						}
-						
+
 						// Append fragments
-						if tcChunk.ID != "" { toolCallIndices[idx].ID = tcChunk.ID }
-						if tcChunk.Type != "" { toolCallIndices[idx].Type = tcChunk.Type }
-						if tcChunk.Function.Name != "" { toolCallIndices[idx].Function.Name += tcChunk.Function.Name }
-						if tcChunk.Function.Arguments != "" { toolCallIndices[idx].Function.Arguments += tcChunk.Function.Arguments }
+						if tcChunk.ID != "" {
+							toolCallIndices[idx].ID = tcChunk.ID
+						}
+						if tcChunk.Type != "" {
+							toolCallIndices[idx].Type = tcChunk.Type
+						}
+						if tcChunk.Function.Name != "" {
+							toolCallIndices[idx].Function.Name += tcChunk.Function.Name
+						}
+						if tcChunk.Function.Arguments != "" {
+							toolCallIndices[idx].Function.Arguments += tcChunk.Function.Arguments
+						}
 					}
 				}
 			}
@@ -170,6 +192,9 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 	}
 
 	// Reassemble tool calls into the final message
+	if inThinkingBlock {
+		printThinkingBlockEnd()
+	}
 	for i := 0; i <= currentToolCallIndex; i++ {
 		if tc, exists := toolCallIndices[i]; exists {
 			fullMessage.ToolCalls = append(fullMessage.ToolCalls, *tc)
@@ -177,4 +202,22 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 	}
 
 	return fullMessage, nil
+}
+
+func printThinkingBlockStart() {
+	fmt.Print("\n┌─ Thinking ───────────────────────────────────────────────┐\n")
+}
+
+func printThinkingContent(content string) {
+	if content == "" {
+		return
+	}
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		fmt.Printf("│ %s\n", line)
+	}
+}
+
+func printThinkingBlockEnd() {
+	fmt.Print("└─────────────────────────────────────────────────────────┘\n")
 }
