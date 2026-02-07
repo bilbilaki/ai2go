@@ -52,8 +52,7 @@ func (h *History) SetSystemMessage(currentModel string) {
 	}
 	sysMsg := api.Message{
 		Role: "system",
-		Content: 
-		fmt.Sprintf(`You are an advanced terminal assistant. 
+		Content: fmt.Sprintf(`You are an advanced terminal assistant. 
 Current OS: %s
  
 RULES:
@@ -63,8 +62,13 @@ RULES:
    - "26--"         -> Remove line 26.
    - "26++ code"    -> Replace line 26 with "code".
    - "26++"         -> Clear line 26 (make it empty).
+   - "26<< code"    -> Insert "code" before line 26.
+   - "26>> code"    -> Insert "code" after line 26.
+   - "26++ a\\nb"   -> Replace line 26 with multiple lines.
    - "0++ code"     -> Insert "code" at the VERY START of file.
    - "00++ code"    -> Append "code" to the VERY END of file.
+   - "0<< code"     -> Insert "code" at the VERY START of file.
+   - "00>> code"    -> Append "code" to the VERY END of file.
 3. IMPORTANT: If You want Using 'patch_file' for Editing files Use the ORIGINAL line numbers from 'read_file'. The tool handles the offsets automatically. Do not manually calculate shifted line numbers.
 4. HANDLING LONG OUTPUT:
    - If a command returns "[OUTPUT TRUNCATED]", DO NOT apologize. 
@@ -102,7 +106,7 @@ func (h *History) AddToolResponse(toolCallID, content string) {
 		Content:    content,
 		ToolCallID: toolCallID,
 	})
-	
+
 	// Only count tokens if we have a counter
 	if h.counter != nil {
 		h.counter.Add(ApproximateTokens(content))
@@ -112,6 +116,15 @@ func (h *History) AddToolResponse(toolCallID, content string) {
 func (h *History) Clear(currentModel string) {
 	h.SetSystemMessage(currentModel)
 	h.counter.Reset()
+}
+
+func (h *History) ReplaceWithMessages(currentModel string, messages []api.Message) {
+	h.SetSystemMessage(currentModel)
+	h.counter.Reset()
+	for _, msg := range messages {
+		h.messages = append(h.messages, msg)
+		h.counter.Add(ApproximateTokens(msg.Content))
+	}
 }
 
 func (h *History) GetMessages() []api.Message {
@@ -138,13 +151,13 @@ func (h *History) ReplaceWithSummary(currentModel, summary string) {
 	h.Clear(currentModel)
 
 	summaryContext := fmt.Sprintf("Here is a summary of our conversation so far. Use this context to continue assisting me:\n\n%s", summary)
-	
+
 	h.AddUserMessage(summaryContext)
 
 	h.AddAssistantMessage(api.Message{
 		Role:    "assistant",
 		Content: "Understood. I have updated my context with the summary and am ready to continue.",
 	})
-	
+
 	fmt.Printf("\n\033[90m[Debug] Token count reset to: %d\033[0m\n", h.GetTotalTokens())
 }

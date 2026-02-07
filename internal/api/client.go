@@ -47,10 +47,18 @@ func (c *Client) initHTTPClient() {
 		}
 	}
 
+	timeout := time.Duration(c.config.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
 	c.httpClient = &http.Client{
-		Timeout:   600 * time.Second,
+		Timeout:   timeout,
 		Transport: transport,
 	}
+}
+
+func (c *Client) Reload() {
+	c.initHTTPClient()
 }
 
 func (c *Client) GetAvailableModels() ([]Model, error) {
@@ -113,12 +121,13 @@ func (c *Client) RunCompletion(history []Message, tools []Tool, model string) (M
 
 func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 	br := bufio.NewReader(body)
-	
+
 	var fullMessage Message
 	fullMessage.Role = "assistant"
-	
-	toolCallIndices := make(map[int]*ToolCall)
-	currentToolCallIndex := -1
+
+	toolCallMap := make(map[string]*ToolCall)
+	var toolCallOrder []string
+	inThinkingBlock := false
 
 	for {
 		line, err := br.ReadString('\n')
@@ -139,30 +148,68 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 			var chunk StreamChunk
 			if json.Unmarshal([]byte(data), &chunk) == nil {
 				for _, choice := range chunk.Choices {
+					// Handle Thinking/Reasoning Content
+					if choice.Delta.Thinking != "" || choice.Delta.Reasoning != "" {
+						if !inThinkingBlock {
+							printThinkingBlockStart()
+							inThinkingBlock = true
+						}
+						printThinkingContent(choice.Delta.Thinking + choice.Delta.Reasoning)
+					}
+
 					// Handle Text Content
 					if choice.Delta.Content != "" {
+						if inThinkingBlock {
+							printThinkingBlockEnd()
+							inThinkingBlock = false
+						}
 						fmt.Print(choice.Delta.Content)
 						fullMessage.Content += choice.Delta.Content
 					}
 
 					// Handle Tool Call chunks
 					for i, tcChunk := range choice.Delta.ToolCalls {
-						idx := i
-						currentToolCallIndex = idx
-						
-						if _, exists := toolCallIndices[idx]; !exists {
-							toolCallIndices[idx] = &ToolCall{
+						key := tcChunk.ID
+						fallbackKey := fmt.Sprintf("idx:%d", i)
+						if key == "" {
+							key = fallbackKey
+						} else if key != fallbackKey {
+							if existing, ok := toolCallMap[fallbackKey]; ok {
+								toolCallMap[key] = existing
+								delete(toolCallMap, fallbackKey)
+								for idx, existingKey := range toolCallOrder {
+									if existingKey == fallbackKey {
+										toolCallOrder[idx] = key
+										break
+									}
+								}
+							}
+						}
+
+						if _, exists := toolCallMap[key]; !exists {
+							toolCallMap[key] = &ToolCall{
 								ID:       tcChunk.ID,
 								Type:     tcChunk.Type,
 								Function: FunctionCall{},
 							}
+							toolCallOrder = append(toolCallOrder, key)
 						}
-						
+
+						toolCall := toolCallMap[key]
+
 						// Append fragments
-						if tcChunk.ID != "" { toolCallIndices[idx].ID = tcChunk.ID }
-						if tcChunk.Type != "" { toolCallIndices[idx].Type = tcChunk.Type }
-						if tcChunk.Function.Name != "" { toolCallIndices[idx].Function.Name += tcChunk.Function.Name }
-						if tcChunk.Function.Arguments != "" { toolCallIndices[idx].Function.Arguments += tcChunk.Function.Arguments }
+						if tcChunk.ID != "" {
+							toolCall.ID = tcChunk.ID
+						}
+						if tcChunk.Type != "" {
+							toolCall.Type = tcChunk.Type
+						}
+						if tcChunk.Function.Name != "" {
+							toolCall.Function.Name += tcChunk.Function.Name
+						}
+						if tcChunk.Function.Arguments != "" {
+							toolCall.Function.Arguments += tcChunk.Function.Arguments
+						}
 					}
 				}
 			}
@@ -170,11 +217,32 @@ func (c *Client) handleStreamingResponse(body io.ReadCloser) (Message, error) {
 	}
 
 	// Reassemble tool calls into the final message
-	for i := 0; i <= currentToolCallIndex; i++ {
-		if tc, exists := toolCallIndices[i]; exists {
+	if inThinkingBlock {
+		printThinkingBlockEnd()
+	}
+	for _, key := range toolCallOrder {
+		if tc, exists := toolCallMap[key]; exists {
 			fullMessage.ToolCalls = append(fullMessage.ToolCalls, *tc)
 		}
 	}
 
 	return fullMessage, nil
+}
+
+func printThinkingBlockStart() {
+	fmt.Print("\n┌─ Thinking ───────────────────────────────────────────────┐\n")
+}
+
+func printThinkingContent(content string) {
+	if content == "" {
+		return
+	}
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		fmt.Printf("│ %s\n", line)
+	}
+}
+
+func printThinkingBlockEnd() {
+	fmt.Print("└─────────────────────────────────────────────────────────┘\n")
 }
