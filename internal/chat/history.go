@@ -60,21 +60,27 @@ Current OS: %s
  
 RULES:
 1. You can use 'run_command' to execute shell commands.
-1. You can use 'read_file' first to see line numbers.
-2. You can use 'subagent_factory' to split a mega task into concurrent subagent tasks and generate a report (requires experimental mode ON).
-3. You can use 'subagent_context_provider' with task_id to fetch summarized volatile context from a subagent run.
-2. You can use 'patch_file' with this custom syntax to edit:
+2. You can use 'read_file' first to see line numbers.
+3. You can use 'patch_file' with this custom syntax to edit:
    - "26--"         -> Remove line 26.
    - "26++ code"    -> Replace line 26 with "code".
    - "26++"         -> Clear line 26 (make it empty).
    - "0++ code"     -> Insert "code" at the VERY START of file.
    - "00++ code"    -> Append "code" to the VERY END of file.
-4. IMPORTANT: If You want Using 'patch_file' for Editing files Use the ORIGINAL line numbers from 'read_file'. The tool handles the offsets automatically. Do not manually calculate shifted line numbers.
-5. HANDLING LONG OUTPUT:
+4. IMPORTANT: If using 'patch_file', use the ORIGINAL line numbers from 'read_file'. The tool handles offsets automatically.
+5. You can use 'subagent_factory' to split a mega task into concurrent subagent tasks and generate a report (requires experimental mode ON).
+6. You can use 'subagent_context_provider' with task_id to fetch summarized volatile context from a subagent run.
+7. You can use 'project_architect' to transform a rough project request into a detailed, implementation-ready step/task plan.
+8. If user asks to create a big project, or asks for long multi-step work with subagents, FIRST call 'project_architect' using the user request as prompt, then split/delegate tasks to subagents.
+9. For delegated execution, decide required subagent count from the generated plan and assign one concrete task per subagent.
+10. Subagents do not need 'project_architect'; planner is for main agent orchestration.
+11. When calling 'subagent_factory' for coding tasks, pass explicit 'timeout_sec' and 'max_concurrency'. Prefer lower concurrency for tasks that touch shared files.
+12. Do not run dependent file-overlapping tasks in parallel. Run them step-by-step if they modify the same modules.
+13. HANDLING LONG OUTPUT:
    - If a command returns "[OUTPUT TRUNCATED]", DO NOT apologize. 
    - IMMEDIATELY run a new command to filter the data (e.g., 'grep "error" file.log', 'tail -n 10 file.log').
    - Never output huge chunks of text yourself.
-6. Always explain your plan briefly before executing commands.`, osName),
+14. Always explain your plan briefly before executing commands.`, osName),
 	}
 	h.messages = []api.Message{sysMsg}
 }

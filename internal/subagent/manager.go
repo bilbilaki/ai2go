@@ -26,6 +26,9 @@ const (
 	statusUnknown         = "UNKNOWN"
 	maxSubagentIterations = 16
 	maxSubagentDepth      = 2
+	defaultTimeoutSec     = 300
+	defaultConcurrency    = 3
+	finalizeWindow        = 20 * time.Second
 )
 
 type FactoryInput struct {
@@ -149,7 +152,7 @@ func (m *Manager) runFactoryWithDepth(ctx context.Context, client *api.Client, d
 
 	maxConc := input.MaxConcurrency
 	if maxConc <= 0 {
-		maxConc = 10
+		maxConc = defaultConcurrency
 	}
 	if maxConc > 200 {
 		maxConc = 200
@@ -157,7 +160,7 @@ func (m *Manager) runFactoryWithDepth(ctx context.Context, client *api.Client, d
 
 	timeoutSec := input.TimeoutSec
 	if timeoutSec <= 0 {
-		timeoutSec = 120
+		timeoutSec = defaultTimeoutSec
 	}
 	if timeoutSec > 3600 {
 		timeoutSec = 3600
@@ -434,8 +437,8 @@ func ParseFactoryInput(raw string) (FactoryInput, error) {
 		SplitSymbol:     getString(obj, "split_symbol", "---TASK---"),
 		SplitRegex:      getString(obj, "split_regex", ""),
 		BaseInstruction: getString(obj, "base_instruction", ""),
-		MaxConcurrency:  getInt(obj, "max_concurrency", 10),
-		TimeoutSec:      getInt(obj, "timeout_sec", 120),
+		MaxConcurrency:  getInt(obj, "max_concurrency", defaultConcurrency),
+		TimeoutSec:      getInt(obj, "timeout_sec", defaultTimeoutSec),
 		TTLSeconds:      getInt(obj, "ttl_seconds", 600),
 		OutputDir:       getString(obj, "output_dir", ""),
 		Model:           getString(obj, "model", ""),
@@ -473,12 +476,13 @@ func FormatBatchReport(report BatchReport) string {
 
 func buildTaskOutputFile(task TaskContext) string {
 	return fmt.Sprintf(
-		"TaskID: %s\nBatchID: %s\nTaskList: %s\nStatus: %s\nErrorCode: %s\nStartedAt: %s\nFinishedAt: %s\nDurationMs: %d\nPromptPreview:\n%s\n\nInstruction:\n%s\n\nTaskPrompt:\n%s\n\nOutput:\n%s\n",
+		"TaskID: %s\nBatchID: %s\nTaskList: %s\nStatus: %s\nErrorCode: %s\nErrorMessage: %s\nStartedAt: %s\nFinishedAt: %s\nDurationMs: %d\nPromptPreview:\n%s\n\nInstruction:\n%s\n\nTaskPrompt:\n%s\n\nOutput:\n%s\n",
 		task.TaskID,
 		task.BatchID,
 		task.TaskListName,
 		task.Status,
 		task.ErrorCode,
+		task.ErrorMessage,
 		task.StartedAt.Format(time.RFC3339),
 		task.FinishedAt.Format(time.RFC3339),
 		task.DurationMs,
@@ -665,7 +669,7 @@ func (a Agent) Run(ctx context.Context, taskPrompt, instruction string) (string,
 		workerSystem = "You are a reliable coding subagent."
 	}
 
-	workerSystem += "\n\nYou are a subagent worker. Complete only the assigned task. You may call tools when useful, then return the final answer."
+	workerSystem += "\n\nYou are a subagent worker. Complete only the assigned task. Keep the scope narrow. Avoid broad refactors and avoid unrelated files. Do not run long/global commands (full build/test) unless the task explicitly requires it. Use concise tool calls, then return a final answer quickly with changed files and what remains."
 
 	userPrompt := strings.TrimSpace(taskPrompt)
 	if strings.TrimSpace(instruction) != "" {
@@ -676,6 +680,7 @@ func (a Agent) Run(ctx context.Context, taskPrompt, instruction string) (string,
 		{Role: "system", Content: workerSystem},
 		{Role: "user", Content: userPrompt},
 	}
+	progress := strings.Builder{}
 
 	toolList := []api.Tool{
 		tools.GetCLITool(),
@@ -688,17 +693,48 @@ func (a Agent) Run(ctx context.Context, taskPrompt, instruction string) (string,
 	}
 
 	for i := 0; i < maxSubagentIterations; i++ {
+		if shouldFinalizeNow(ctx, finalizeWindow) {
+			finalText, err := a.forceFinalizeNoTools(ctx, msgs)
+			if err == nil && strings.TrimSpace(finalText) != "" {
+				if progress.Len() > 0 {
+					return strings.TrimSpace(progress.String()) + "\n\n" + finalText, nil
+				}
+				return finalText, nil
+			}
+			if progress.Len() > 0 {
+				return strings.TrimSpace(progress.String()), context.DeadlineExceeded
+			}
+			return "", context.DeadlineExceeded
+		}
+
 		resp, err := a.client.RunCompletionOnce(ctx, msgs, toolList, a.model)
 		if err != nil {
+			if progress.Len() > 0 {
+				return strings.TrimSpace(progress.String()), err
+			}
 			return "", err
 		}
 		msgs = append(msgs, resp)
+		if txt := strings.TrimSpace(resp.Content); txt != "" {
+			progress.WriteString("Assistant:\n")
+			progress.WriteString(txt)
+			progress.WriteString("\n\n")
+		}
 		if len(resp.ToolCalls) == 0 {
+			if progress.Len() > 0 {
+				return strings.TrimSpace(progress.String()), nil
+			}
 			return strings.TrimSpace(resp.Content), nil
 		}
 
 		for _, tc := range resp.ToolCalls {
+			progress.WriteString(fmt.Sprintf("ToolCall: %s\n", tc.Function.Name))
 			toolOutput := a.executeToolCall(ctx, tc)
+			if snip := snippet(toolOutput, 600); strings.TrimSpace(snip) != "" {
+				progress.WriteString("ToolOutput:\n")
+				progress.WriteString(snip)
+				progress.WriteString("\n\n")
+			}
 			msgs = append(msgs, api.Message{
 				Role:       "tool",
 				ToolCallID: tc.ID,
@@ -707,7 +743,48 @@ func (a Agent) Run(ctx context.Context, taskPrompt, instruction string) (string,
 		}
 	}
 
+	if progress.Len() > 0 {
+		return strings.TrimSpace(progress.String()), fmt.Errorf("subagent exceeded maximum tool iterations (%d)", maxSubagentIterations)
+	}
 	return "", fmt.Errorf("subagent exceeded maximum tool iterations (%d)", maxSubagentIterations)
+}
+
+func shouldFinalizeNow(ctx context.Context, threshold time.Duration) bool {
+	if threshold <= 0 {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return false
+	}
+	return time.Until(deadline) <= threshold
+}
+
+func (a Agent) forceFinalizeNoTools(ctx context.Context, msgs []api.Message) (string, error) {
+	finalizePrompt := "Time budget is almost finished. Stop using tools now. Return a concise final report with: 1) what was completed, 2) exact files changed, 3) unresolved items."
+	msgs = append(msgs, api.Message{Role: "user", Content: finalizePrompt})
+
+	finalCtx := ctx
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > 2*time.Second {
+			budget := 8 * time.Second
+			if remaining < budget {
+				budget = remaining - time.Second
+			}
+			if budget > 0 {
+				var cancel context.CancelFunc
+				finalCtx, cancel = context.WithTimeout(ctx, budget)
+				defer cancel()
+			}
+		}
+	}
+
+	resp, err := a.client.RunCompletionOnce(finalCtx, msgs, nil, a.model)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(resp.Content), nil
 }
 
 func (a Agent) executeToolCall(ctx context.Context, tc api.ToolCall) string {

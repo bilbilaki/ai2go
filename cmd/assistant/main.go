@@ -46,7 +46,8 @@ func main() {
 	patchTool := tools.GetPatchFileTool() // <--- New
 	subagentFactoryTool := tools.GetSubagentFactoryTool()
 	subagentContextTool := tools.GetSubagentContextProviderTool()
-	toolsList := []api.Tool{cliTool, readTool, patchTool, subagentFactoryTool, subagentContextTool}
+	projectArchitectTool := tools.GetProjectArchitectTool()
+	toolsList := []api.Tool{cliTool, readTool, patchTool, subagentFactoryTool, subagentContextTool, projectArchitectTool}
 	apiClient := api.NewClient(cfg)
 
 	homeDir, _ := os.UserHomeDir()

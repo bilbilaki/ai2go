@@ -207,6 +207,27 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 				}
 				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
 
+			case "project_architect":
+				var args map[string]string
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for project_architect: %v", err)
+					break
+				}
+				rawPrompt := strings.TrimSpace(args["prompt"])
+				if rawPrompt == "" {
+					toolResponse = "Error: project_architect requires a non-empty 'prompt' argument."
+					break
+				}
+
+				fmt.Printf("\n%s\n", ui.Tool("[Project Architect] Building detailed execution plan..."))
+				output, err := tools.BuildProjectArchitecturePlan(ctx, apiClient, cfg.CurrentModel, rawPrompt)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: project_architect failed: %v", err)
+				} else {
+					toolResponse = output
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
 			default:
 				toolResponse = fmt.Sprintf("Error: unsupported tool '%s'", tCall.Function.Name)
 			}

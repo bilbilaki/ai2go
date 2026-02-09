@@ -75,8 +75,8 @@ func GetSubagentFactoryTool() api.Tool {
 					"split_symbol": { "type": "string", "description": "Delimiter for splitting tasks (default: ---TASK---)." },
 					"split_regex": { "type": "string", "description": "Optional regex splitter; overrides split_symbol if provided." },
 					"base_instruction": { "type": "string", "description": "Optional instruction prepended to every task." },
-					"max_concurrency": { "type": "integer", "description": "Concurrent subagents (1..200, default 10)." },
-					"timeout_sec": { "type": "integer", "description": "Per-task timeout in seconds (default 120)." },
+					"max_concurrency": { "type": "integer", "description": "Concurrent subagents (1..200, default 3)." },
+					"timeout_sec": { "type": "integer", "description": "Per-task timeout in seconds (default 300)." },
 					"ttl_seconds": { "type": "integer", "description": "TTL for volatile task context store (default 600)." },
 					"output_dir": { "type": "string", "description": "Optional output directory for results/report." },
 					"model": { "type": "string", "description": "Optional model override for subagents." }
@@ -100,6 +100,26 @@ func GetSubagentContextProviderTool() api.Tool {
 					"consume": { "type": "boolean", "description": "Delete this task context after retrieval (default: true)." }
 				},
 				"required": ["task_id"]
+			}`),
+		},
+	}
+}
+
+func GetProjectArchitectTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "project_architect",
+			Description: "Builds a detailed multi-step execution plan from a rough project request using a fresh model context.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"prompt": {
+						"type": "string",
+						"description": "Raw project request to expand into implementation-ready tasks."
+					}
+				},
+				"required": ["prompt"]
 			}`),
 		},
 	}
