@@ -308,6 +308,143 @@ func GetPatchFileTool() api.Tool {
 	}
 }
 
+func GetApplyUnifiedDiffPatchTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "apply_unified_diff_patch",
+			Description: "Applies a standard unified diff patch to a worktree using the editor git engine with checkpoint + rollback safety.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"work_tree": { "type": "string", "description": "Target project directory/worktree." },
+					"patch": { "type": "string", "description": "Unified diff content (git diff format)." },
+					"verify_mode": {
+						"type": "string",
+						"enum": ["none", "syntax", "tests"],
+						"description": "Post-apply verification mode. Default: none."
+					}
+				},
+				"required": ["work_tree", "patch"]
+			}`),
+		},
+	}
+}
+
+func GetCreateCheckpointTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "create_checkpoint",
+			Description: "Creates a git-backed editor checkpoint commit for a worktree.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"work_tree": { "type": "string", "description": "Target project directory/worktree." },
+					"file_path": { "type": "string", "description": "Optional file path to stage; if omitted stages all changes." },
+					"message": { "type": "string", "description": "Checkpoint commit message." }
+				},
+				"required": ["work_tree"]
+			}`),
+		},
+	}
+}
+
+func GetUndoCheckpointsTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "undo_checkpoints",
+			Description: "Undo the last N editor checkpoints in a worktree.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"work_tree": { "type": "string", "description": "Target project directory/worktree." },
+					"steps": { "type": "integer", "description": "Number of checkpoints to undo. Default: 1." }
+				},
+				"required": ["work_tree"]
+			}`),
+		},
+	}
+}
+
+func GetEditorHistoryTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "editor_history",
+			Description: "Shows recent editor checkpoint history for a worktree.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"work_tree": { "type": "string", "description": "Target project directory/worktree." },
+					"limit": { "type": "integer", "description": "Number of history entries to return. Default: 10." }
+				},
+				"required": ["work_tree"]
+			}`),
+		},
+	}
+}
+
+func GetPageSizeTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "get_page_size",
+			Description: "Returns OS memory page size in bytes.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {}
+			}`),
+		},
+	}
+}
+
+func GetProcessSignalTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "send_process_signal",
+			Description: "Sends a signal to a process tree with optional graceful timeout.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"pid": { "type": "integer", "description": "Root process ID." },
+					"signal": { "type": "string", "description": "Signal name or number (default TERM)." },
+					"graceful_timeout": { "type": "integer", "description": "Graceful timeout in seconds before force kill. Default 0 (no forced retry)." },
+					"force": { "type": "boolean", "description": "Force immediate KILL if true." }
+				},
+				"required": ["pid"]
+			}`),
+		},
+	}
+}
+
+func GetCPUUsageSampleTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "get_process_cpu_usage_sample",
+			Description: "Samples and returns CPU usage percent for given PIDs.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"pids": {
+						"type": "array",
+						"items": { "type": "integer" },
+						"description": "Process IDs to sample."
+					},
+					"as_integer": {
+						"type": "boolean",
+						"description": "Return rounded integer percentages if true."
+					}
+				},
+				"required": ["pids"]
+			}`),
+		},
+	}
+}
+
 func GetAskUserTool() api.Tool {
 	return api.Tool{
 		Type: "function",

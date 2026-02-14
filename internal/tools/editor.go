@@ -2,12 +2,25 @@ package tools
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+)
+
+// VerifyMode controls post-patch verification behavior.
+type VerifyMode string
+
+const (
+	VerifyModeNone   VerifyMode = "none"
+	VerifyModeSyntax VerifyMode = "syntax"
+	VerifyModeTests  VerifyMode = "tests"
 )
 
 // ReadFileWithLines returns content with line numbers (e.g., "1 | package main").
@@ -180,4 +193,218 @@ func ApplyFilePatch(path, patchContent string) (string, error) {
 	}
 
 	return fmt.Sprintf("Successfully patched %s. Check content to verify.", path), nil
+}
+
+// EnsureEditorGitRepo creates (if needed) and configures a per-worktree git repo under user cache.
+func EnsureEditorGitRepo(workTree string) error {
+	if workTree == "" {
+		return fmt.Errorf("workTree is required")
+	}
+	absWorkTree, err := filepath.Abs(workTree)
+	if err != nil {
+		return fmt.Errorf("failed to resolve worktree path: %w", err)
+	}
+	if err := os.MkdirAll(absWorkTree, 0755); err != nil {
+		return fmt.Errorf("failed to ensure worktree exists: %w", err)
+	}
+
+	gitDir, err := editorGitDir(absWorkTree)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(gitDir), 0755); err != nil {
+		return fmt.Errorf("failed to create editor cache: %w", err)
+	}
+	if _, statErr := os.Stat(gitDir); os.IsNotExist(statErr) {
+		if err := os.MkdirAll(gitDir, 0755); err != nil {
+			return fmt.Errorf("failed to create git dir: %w", err)
+		}
+		if _, err := runGit(absWorkTree, "init", "--quiet"); err != nil {
+			return err
+		}
+	}
+
+	_, err = runGit(absWorkTree, "config", "user.name", "ai2go-editor")
+	if err != nil {
+		return err
+	}
+	_, err = runGit(absWorkTree, "config", "user.email", "editor@ai2go.local")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// CreateCheckpoint creates a commit checkpoint for a file or the whole worktree when filePath is empty.
+func CreateCheckpoint(workTree, filePath, message string) (string, error) {
+	if err := EnsureEditorGitRepo(workTree); err != nil {
+		return "", err
+	}
+
+	if strings.TrimSpace(message) == "" {
+		message = "editor checkpoint"
+	}
+
+	if strings.TrimSpace(filePath) == "" {
+		if _, err := runGit(workTree, "add", "-A"); err != nil {
+			return "", err
+		}
+	} else {
+		if _, err := runGit(workTree, "add", "--", filePath); err != nil {
+			return "", err
+		}
+	}
+
+	if _, err := runGit(workTree, "commit", "--allow-empty", "-m", message); err != nil {
+		return "", err
+	}
+
+	head, err := runGit(workTree, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(head), nil
+}
+
+// ApplyUnifiedDiffPatch applies a unified diff patch with checkpointing and optional verification.
+func ApplyUnifiedDiffPatch(workTree, patchContent string, verifyMode VerifyMode) (string, error) {
+	pre, err := CreateCheckpoint(workTree, "", "editor checkpoint: pre-apply")
+	if err != nil {
+		return "", fmt.Errorf("failed to create pre-apply checkpoint: %w", err)
+	}
+
+	if _, err := runGitWithInput(workTree, patchContent, "apply", "--whitespace=nowarn", "-"); err != nil {
+		_ = rollbackTo(workTree, pre)
+		return "", fmt.Errorf("failed to apply unified diff (rolled back): %w", err)
+	}
+
+	if err := runVerification(workTree, verifyMode); err != nil {
+		_ = rollbackTo(workTree, pre)
+		return "", fmt.Errorf("verification failed and changes were rolled back: %w", err)
+	}
+
+	post, err := CreateCheckpoint(workTree, "", "editor checkpoint: post-apply")
+	if err != nil {
+		_ = rollbackTo(workTree, pre)
+		return "", fmt.Errorf("failed to create post-apply checkpoint; rolled back: %w", err)
+	}
+
+	return fmt.Sprintf("Patch applied successfully. Checkpoints: pre=%s post=%s", pre, post), nil
+}
+
+// UndoLastCheckpoints undoes the last N checkpoints.
+func UndoLastCheckpoints(workTree string, steps int) (string, error) {
+	if steps < 1 {
+		return "", fmt.Errorf("steps must be >= 1")
+	}
+	if err := EnsureEditorGitRepo(workTree); err != nil {
+		return "", err
+	}
+
+	target := fmt.Sprintf("HEAD~%d", steps)
+	if _, err := runGit(workTree, "reset", "--hard", target); err != nil {
+		return "", err
+	}
+	if _, err := runGit(workTree, "clean", "-fd"); err != nil {
+		return "", err
+	}
+	head, err := runGit(workTree, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(head), nil
+}
+
+// EditorHistory returns latest N checkpoints as `sha message` lines.
+func EditorHistory(workTree string, n int) (string, error) {
+	if n < 1 {
+		return "", fmt.Errorf("n must be >= 1")
+	}
+	if err := EnsureEditorGitRepo(workTree); err != nil {
+		return "", err
+	}
+
+	out, err := runGit(workTree, "log", fmt.Sprintf("-%d", n), "--pretty=format:%h %s")
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out) == "" {
+		return "(No editor checkpoints yet)", nil
+	}
+	return out, nil
+}
+
+func editorGitDir(workTree string) (string, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to locate user cache dir: %w", err)
+	}
+	hash := sha256.Sum256([]byte(workTree))
+	return filepath.Join(cacheDir, "ai2go", "editor", hex.EncodeToString(hash[:]), "git"), nil
+}
+
+func runGit(workTree string, args ...string) (string, error) {
+	return runGitWithInput(workTree, "", args...)
+}
+
+func runGitWithInput(workTree, input string, args ...string) (string, error) {
+	absWorkTree, err := filepath.Abs(workTree)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve worktree path: %w", err)
+	}
+	gitDir, err := editorGitDir(absWorkTree)
+	if err != nil {
+		return "", err
+	}
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = absWorkTree
+	cmd.Env = append(os.Environ(),
+		"GIT_DIR="+gitDir,
+		"GIT_WORK_TREE="+absWorkTree,
+	)
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s failed: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func runVerification(workTree string, mode VerifyMode) error {
+	switch mode {
+	case VerifyModeNone, "":
+		return nil
+	case VerifyModeSyntax:
+		_, err := runCommandInDir(workTree, "go", "test", "./...", "-run=^$")
+		return err
+	case VerifyModeTests:
+		_, err := runCommandInDir(workTree, "go", "test", "./...")
+		return err
+	default:
+		return fmt.Errorf("unsupported verify mode: %s", mode)
+	}
+}
+
+func rollbackTo(workTree, commit string) error {
+	if _, err := runGit(workTree, "reset", "--hard", commit); err != nil {
+		return err
+	}
+	if _, err := runGit(workTree, "clean", "-fd"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func runCommandInDir(dir, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s %s failed: %w\n%s", name, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return strings.TrimSpace(string(output)), nil
 }

@@ -60,34 +60,37 @@ Current OS: %s
  
 RULES:
 1. You can use 'run_command' to execute shell commands.
-2. You can use 'read_file' first to see line numbers.
-3. You can use 'patch_file' with this custom syntax to edit:
-   - "26--"         -> Remove line 26.
-   - "26++ code"    -> Replace line 26 with "code".
-   - "26++"         -> Clear line 26 (make it empty).
-   - "0++ code"     -> Insert "code" at the VERY START of file.
-   - "00++ code"    -> Append "code" to the VERY END of file.
-4. IMPORTANT: If using 'patch_file', use the ORIGINAL line numbers from 'read_file'. The tool handles offsets automatically.
-5. You can use 'subagent_factory' to split a mega task into concurrent subagent tasks and generate a report (requires experimental mode ON).
-6. You can use 'subagent_context_provider' with task_id to fetch summarized volatile context from a subagent run.
-7. You can use 'project_architect' to transform a rough project request into a detailed, implementation-ready step/task plan.
-8. If user asks to create a big project, or asks for long multi-step work with subagents, FIRST call 'project_architect' using the user request as prompt, then split/delegate tasks to subagents.
-9. For delegated execution, decide required subagent count from the generated plan and assign one concrete task per subagent.
-10. Subagents do not need 'project_architect'; planner is for main agent orchestration.
-11. When calling 'subagent_factory' for coding tasks, pass explicit 'timeout_sec' and 'max_concurrency'. Prefer lower concurrency for tasks that touch shared files.
-12. Do not run dependent file-overlapping tasks in parallel. Run them step-by-step if they modify the same modules.
-13. HANDLING LONG OUTPUT:
+2. You can use 'read_file' to inspect files with line numbers.
+3. Prefer 'apply_unified_diff_patch' for edits using standard unified diffs (git diff format).
+   - Required args: 'work_tree', 'patch'
+   - Optional: 'verify_mode' in ['none', 'syntax', 'tests']
+   - It auto-checkpoints and auto-rolls back on apply/verify failures.
+4. You can use 'create_checkpoint', 'editor_history', and 'undo_checkpoints' for manual checkpoint workflow.
+5. Legacy 'patch_file' is still available for old line-based patches, but use unified diff tools by default.
+6. You can use process/system helpers when needed:
+   - 'get_process_cpu_usage_sample' for PID CPU sampling
+   - 'send_process_signal' for process tree signals
+   - 'get_page_size' for OS page size
+7. You can use 'subagent_factory' to split a mega task into concurrent subagent tasks and generate a report (requires experimental mode ON).
+8. You can use 'subagent_context_provider' with task_id to fetch summarized volatile context from a subagent run.
+9. You can use 'project_architect' to transform a rough project request into a detailed, implementation-ready step/task plan.
+10. If user asks to create a big project, or asks for long multi-step work with subagents, FIRST call 'project_architect' using the user request as prompt, then split/delegate tasks to subagents.
+11. For delegated execution, decide required subagent count from the generated plan and assign one concrete task per subagent.
+12. Subagents do not need 'project_architect'; planner is for main agent orchestration.
+13. When calling 'subagent_factory' for coding tasks, pass explicit 'timeout_sec' and 'max_concurrency'. Prefer lower concurrency for tasks that touch shared files.
+14. Do not run dependent file-overlapping tasks in parallel. Run them step-by-step if they modify the same modules.
+15. HANDLING LONG OUTPUT:
    - If a command returns "[OUTPUT TRUNCATED]", DO NOT apologize. 
    - IMMEDIATELY run a new command to filter the data (e.g., 'grep "error" file.log', 'tail -n 10 file.log').
    - Never output huge chunks of text yourself.
-14. Use 'ask_user' when requirements are ambiguous or there are multiple valid solution paths.
+16. Use 'ask_user' when requirements are ambiguous or there are multiple valid solution paths.
     - Pass a clear 'question'.
     - Add 'options' only if useful; otherwise ask free text.
     - You may ask follow-up questions via repeated 'ask_user' calls until requirements are clear.
-15. For large messy media folders, prefer 'organize_media_files' instead of long shell loops:
+17. For large messy media folders, prefer 'organize_media_files' instead of long shell loops:
     - First run with dry_run=true and show preview summary.
     - Then ask for confirmation and run with dry_run=false.
-16. Always explain your plan briefly before executing commands.`, osName),
+18. Always explain your plan briefly before executing commands.`, osName),
 	}
 	h.messages = []api.Message{sysMsg}
 }

@@ -686,6 +686,13 @@ func (a Agent) Run(ctx context.Context, taskPrompt, instruction string) (string,
 		tools.GetCLITool(),
 		tools.GetReadFileTool(),
 		tools.GetPatchFileTool(),
+		tools.GetApplyUnifiedDiffPatchTool(),
+		tools.GetCreateCheckpointTool(),
+		tools.GetUndoCheckpointsTool(),
+		tools.GetEditorHistoryTool(),
+		tools.GetCPUUsageSampleTool(),
+		tools.GetProcessSignalTool(),
+		tools.GetPageSizeTool(),
 		tools.GetSubagentContextProviderTool(),
 	}
 	if a.experimentalEnabled {
@@ -838,6 +845,150 @@ func (a Agent) executeToolCall(ctx context.Context, tc api.ToolCall) string {
 			return fmt.Sprintf("Error: %v", err)
 		}
 		return out
+	case "apply_unified_diff_patch":
+		var args map[string]string
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			return fmt.Sprintf("Error: invalid arguments for apply_unified_diff_patch: %v", err)
+		}
+		workTree := strings.TrimSpace(args["work_tree"])
+		patch := args["patch"]
+		verifyMode := tools.VerifyMode(strings.TrimSpace(args["verify_mode"]))
+		if verifyMode == "" {
+			verifyMode = tools.VerifyModeNone
+		}
+		if workTree == "" {
+			return "Error: apply_unified_diff_patch requires a non-empty 'work_tree' argument."
+		}
+		if strings.TrimSpace(patch) == "" {
+			return "Error: apply_unified_diff_patch requires a non-empty 'patch' argument."
+		}
+		out, err := tools.ApplyUnifiedDiffPatch(workTree, patch, verifyMode)
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err)
+		}
+		return out
+	case "create_checkpoint":
+		var args map[string]string
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			return fmt.Sprintf("Error: invalid arguments for create_checkpoint: %v", err)
+		}
+		workTree := strings.TrimSpace(args["work_tree"])
+		if workTree == "" {
+			return "Error: create_checkpoint requires a non-empty 'work_tree' argument."
+		}
+		head, err := tools.CreateCheckpoint(workTree, strings.TrimSpace(args["file_path"]), strings.TrimSpace(args["message"]))
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err)
+		}
+		return fmt.Sprintf("Checkpoint created: %s", head)
+	case "undo_checkpoints":
+		var args map[string]any
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			return fmt.Sprintf("Error: invalid arguments for undo_checkpoints: %v", err)
+		}
+		workTree, _ := args["work_tree"].(string)
+		workTree = strings.TrimSpace(workTree)
+		if workTree == "" {
+			return "Error: undo_checkpoints requires a non-empty 'work_tree' argument."
+		}
+		steps := 1
+		if raw, ok := args["steps"]; ok {
+			switch v := raw.(type) {
+			case float64:
+				steps = int(v)
+			case string:
+				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+					steps = n
+				}
+			}
+		}
+		head, err := tools.UndoLastCheckpoints(workTree, steps)
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err)
+		}
+		return fmt.Sprintf("Undo complete. HEAD=%s", head)
+	case "editor_history":
+		var args map[string]any
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			return fmt.Sprintf("Error: invalid arguments for editor_history: %v", err)
+		}
+		workTree, _ := args["work_tree"].(string)
+		workTree = strings.TrimSpace(workTree)
+		if workTree == "" {
+			return "Error: editor_history requires a non-empty 'work_tree' argument."
+		}
+		limit := 10
+		if raw, ok := args["limit"]; ok {
+			switch v := raw.(type) {
+			case float64:
+				limit = int(v)
+			case string:
+				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+					limit = n
+				}
+			}
+		}
+		history, err := tools.EditorHistory(workTree, limit)
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err)
+		}
+		return history
+	case "get_process_cpu_usage_sample":
+		var args map[string]any
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			return fmt.Sprintf("Error: invalid arguments for get_process_cpu_usage_sample: %v", err)
+		}
+		rawPids, _ := args["pids"].([]any)
+		if len(rawPids) == 0 {
+			return "Error: get_process_cpu_usage_sample requires non-empty 'pids'."
+		}
+		pids := make([]int, 0, len(rawPids))
+		for _, p := range rawPids {
+			if f, ok := p.(float64); ok {
+				pids = append(pids, int(f))
+			}
+		}
+		asInteger, _ := args["as_integer"].(bool)
+		if asInteger {
+			vals, err := tools.GetProcessCPUUsageSimple(pids)
+			if err != nil {
+				return fmt.Sprintf("Error: %v", err)
+			}
+			blob, _ := json.Marshal(vals)
+			return string(blob)
+		}
+		vals, err := tools.GetProcessCPUUsage(pids)
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err)
+		}
+		blob, _ := json.Marshal(vals)
+		return string(blob)
+	case "send_process_signal":
+		var args map[string]any
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			return fmt.Sprintf("Error: invalid arguments for send_process_signal: %v", err)
+		}
+		pidF, ok := args["pid"].(float64)
+		if !ok {
+			return "Error: send_process_signal requires integer 'pid'."
+		}
+		pid := int(pidF)
+		signalName, _ := args["signal"].(string)
+		signalName = strings.TrimSpace(signalName)
+		if signalName == "" {
+			signalName = "TERM"
+		}
+		grace := 0
+		if g, ok := args["graceful_timeout"].(float64); ok {
+			grace = int(g)
+		}
+		force, _ := args["force"].(bool)
+		if err := tools.KillProcessTreeWithTimeout(pid, signalName, grace, force); err != nil {
+			return fmt.Sprintf("Error: %v", err)
+		}
+		return fmt.Sprintf("Signal handling completed for pid=%d", pid)
+	case "get_page_size":
+		return fmt.Sprintf("%d", os.Getpagesize())
 	case "subagent_context_provider":
 		taskID, consume, err := ParseContextProviderInput(tc.Function.Arguments)
 		if err != nil {

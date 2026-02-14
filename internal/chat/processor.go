@@ -189,6 +189,183 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 				}
 				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), output)
 
+			case "apply_unified_diff_patch":
+				var args map[string]string
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for apply_unified_diff_patch: %v", err)
+					break
+				}
+				workTree := strings.TrimSpace(args["work_tree"])
+				patch := args["patch"]
+				verifyMode := tools.VerifyMode(strings.TrimSpace(args["verify_mode"]))
+				if verifyMode == "" {
+					verifyMode = tools.VerifyModeNone
+				}
+				if workTree == "" {
+					toolResponse = "Error: apply_unified_diff_patch requires a non-empty 'work_tree' argument."
+					break
+				}
+				if strings.TrimSpace(patch) == "" {
+					toolResponse = "Error: apply_unified_diff_patch requires a non-empty 'patch' argument."
+					break
+				}
+				output, err := tools.ApplyUnifiedDiffPatch(workTree, patch, verifyMode)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: %v", err)
+				} else {
+					toolResponse = output
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
+			case "create_checkpoint":
+				var args map[string]string
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for create_checkpoint: %v", err)
+					break
+				}
+				workTree := strings.TrimSpace(args["work_tree"])
+				if workTree == "" {
+					toolResponse = "Error: create_checkpoint requires a non-empty 'work_tree' argument."
+					break
+				}
+				head, err := tools.CreateCheckpoint(workTree, strings.TrimSpace(args["file_path"]), strings.TrimSpace(args["message"]))
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: %v", err)
+				} else {
+					toolResponse = fmt.Sprintf("Checkpoint created: %s", head)
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
+			case "undo_checkpoints":
+				var args map[string]any
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for undo_checkpoints: %v", err)
+					break
+				}
+				workTree, _ := args["work_tree"].(string)
+				workTree = strings.TrimSpace(workTree)
+				if workTree == "" {
+					toolResponse = "Error: undo_checkpoints requires a non-empty 'work_tree' argument."
+					break
+				}
+				steps := 1
+				if raw, ok := args["steps"]; ok {
+					switch v := raw.(type) {
+					case float64:
+						steps = int(v)
+					case string:
+						if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+							steps = n
+						}
+					}
+				}
+				head, err := tools.UndoLastCheckpoints(workTree, steps)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: %v", err)
+				} else {
+					toolResponse = fmt.Sprintf("Undo complete. HEAD=%s", head)
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
+			case "editor_history":
+				var args map[string]any
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for editor_history: %v", err)
+					break
+				}
+				workTree, _ := args["work_tree"].(string)
+				workTree = strings.TrimSpace(workTree)
+				if workTree == "" {
+					toolResponse = "Error: editor_history requires a non-empty 'work_tree' argument."
+					break
+				}
+				limit := 10
+				if raw, ok := args["limit"]; ok {
+					switch v := raw.(type) {
+					case float64:
+						limit = int(v)
+					case string:
+						if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+							limit = n
+						}
+					}
+				}
+				output, err := tools.EditorHistory(workTree, limit)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: %v", err)
+				} else {
+					toolResponse = output
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
+			case "get_process_cpu_usage_sample":
+				var args map[string]any
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for get_process_cpu_usage_sample: %v", err)
+					break
+				}
+				rawPids, _ := args["pids"].([]any)
+				if len(rawPids) == 0 {
+					toolResponse = "Error: get_process_cpu_usage_sample requires non-empty 'pids'."
+					break
+				}
+				pids := make([]int, 0, len(rawPids))
+				for _, p := range rawPids {
+					if f, ok := p.(float64); ok {
+						pids = append(pids, int(f))
+					}
+				}
+				asInteger, _ := args["as_integer"].(bool)
+				if asInteger {
+					vals, err := tools.GetProcessCPUUsageSimple(pids)
+					if err != nil {
+						toolResponse = fmt.Sprintf("Error: %v", err)
+					} else if blob, mErr := json.Marshal(vals); mErr == nil {
+						toolResponse = string(blob)
+					}
+				} else {
+					vals, err := tools.GetProcessCPUUsage(pids)
+					if err != nil {
+						toolResponse = fmt.Sprintf("Error: %v", err)
+					} else if blob, mErr := json.Marshal(vals); mErr == nil {
+						toolResponse = string(blob)
+					}
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
+			case "send_process_signal":
+				var args map[string]any
+				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for send_process_signal: %v", err)
+					break
+				}
+				pidF, ok := args["pid"].(float64)
+				if !ok {
+					toolResponse = "Error: send_process_signal requires integer 'pid'."
+					break
+				}
+				signalName, _ := args["signal"].(string)
+				signalName = strings.TrimSpace(signalName)
+				if signalName == "" {
+					signalName = "TERM"
+				}
+				grace := 0
+				if g, ok := args["graceful_timeout"].(float64); ok {
+					grace = int(g)
+				}
+				force, _ := args["force"].(bool)
+				err := tools.KillProcessTreeWithTimeout(int(pidF), signalName, grace, force)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: %v", err)
+				} else {
+					toolResponse = fmt.Sprintf("Signal handling completed for pid=%d", int(pidF))
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
+			case "get_page_size":
+				toolResponse = fmt.Sprintf("%d", os.Getpagesize())
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
 			case "ask_user":
 				question, options, err := parseAskUserArgs(tCall.Function.Arguments)
 				if err != nil {
