@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -33,6 +32,11 @@ func HandleCommand(cmd string, history *chat.History, store *chat.ThreadStore, c
 			exp = "ON"
 		}
 		fmt.Printf("Subagent experimental: %s\n", exp)
+		autoSummary := "OFF"
+		if cfg.AutoSummarize {
+			autoSummary = "ON"
+		}
+		fmt.Printf("Auto summarize: %s (threshold=%d)\n", autoSummary, cfg.AutoSummaryThreshold)
 
 	case "/clear":
 		history.Clear(cfg.CurrentModel)
@@ -87,33 +91,7 @@ func HandleCommand(cmd string, history *chat.History, store *chat.ThreadStore, c
 		}
 		fmt.Printf("Subagent experimental mode is now: %s\n", status)
 	case "/summarize":
-		fmt.Println("\n\033[33mGenerating session summary...\033[0m")
-
-		// 1. Prepare the prompt and sanitized history
-		msgs := history.GetSanitizedMessages()
-		prompt := "Summarize the current conversation history. " +
-			"Focus on the user's goals, key commands executed, and important context. " +
-			"Ignore specific details of long tool outputs (represented as 'toolcall successfully done'). " +
-			"Be concise but comprehensive."
-
-		msgs = append(msgs, api.Message{
-			Role:    "user",
-			Content: prompt,
-		})
-
-		// 2. Run completion (This will print the summary to the screen as it generates, which is good feedback)
-		summaryMsg, err := apiClient.RunCompletion(context.Background(), msgs, nil, cfg.CurrentModel)
-		if err != nil {
-			fmt.Printf("\033[31mError generating summary: %v\033[0m\n", err)
-			return
-		}
-
-		// 3. Replace the actual history with the new summary
-		history.ReplaceWithSummary(cfg.CurrentModel, summaryMsg.Content)
-		if err := store.SyncActiveHistory(history); err != nil {
-			fmt.Printf("\033[31mError saving thread: %v\033[0m\n", err)
-		}
-		fmt.Println("\n\033[32mHistory summarized and context refreshed.\033[0m")
+		HandleSummarizeCommand(parts, history, store, cfg, apiClient)
 	case "/help":
 		ShowHelp()
 	case "/setup":

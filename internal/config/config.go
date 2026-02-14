@@ -14,14 +14,17 @@ type Config struct {
 	ProxyURL             string `json:"proxy_url"`
 	AutoAccept           bool   `json:"auto_accept"`
 	SubagentExperimental bool   `json:"subagent_experimental"`
+	AutoSummarize        bool   `json:"auto_summarize"`
+	AutoSummaryThreshold int    `json:"auto_summary_threshold"`
 	CurrentModel         string `json:"current_model"`
 	FirstSetup           bool   `json:"first_setup"`
 }
 
 const (
-	appConfigDir = ".config/ai2go"
-	configFile   = "config.json"
-	defaultModel = ""
+	appConfigDir                = ".config/ai2go"
+	configFile                  = "config.json"
+	defaultModel                = ""
+	defaultAutoSummaryThreshold = 16000
 )
 
 func getConfigPath() (string, error) {
@@ -45,7 +48,8 @@ func getConfigPath() (string, error) {
 }
 func Load() *Config {
 	cfg := &Config{
-		FirstSetup: true,
+		FirstSetup:           true,
+		AutoSummaryThreshold: defaultAutoSummaryThreshold,
 	}
 
 	configPath, err := getConfigPath()
@@ -66,6 +70,9 @@ func Load() *Config {
 	// Ensure current model is set
 	if cfg.CurrentModel == "" {
 		cfg.CurrentModel = defaultModel
+	}
+	if cfg.AutoSummaryThreshold <= 0 {
+		cfg.AutoSummaryThreshold = defaultAutoSummaryThreshold
 	}
 
 	return cfg
@@ -120,6 +127,23 @@ func (c *Config) ToggleAutoAccept() {
 
 func (c *Config) ToggleSubagentExperimental() {
 	c.SubagentExperimental = !c.SubagentExperimental
+	if err := c.Save(); err != nil {
+		fmt.Printf("Error saving config: %v\n", err)
+	}
+}
+
+func (c *Config) ToggleAutoSummarize() {
+	c.AutoSummarize = !c.AutoSummarize
+	if err := c.Save(); err != nil {
+		fmt.Printf("Error saving config: %v\n", err)
+	}
+}
+
+func (c *Config) SetAutoSummaryThreshold(tokens int) {
+	if tokens <= 0 {
+		tokens = defaultAutoSummaryThreshold
+	}
+	c.AutoSummaryThreshold = tokens
 	if err := c.Save(); err != nil {
 		fmt.Printf("Error saving config: %v\n", err)
 	}

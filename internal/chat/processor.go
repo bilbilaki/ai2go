@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/bilbilaki/ai2go/internal/api"
@@ -16,12 +17,21 @@ import (
 	"github.com/bilbilaki/ai2go/internal/ui"
 )
 
-func ProcessConversation(ctx context.Context, history *History, toolsList []api.Tool, cfg *config.Config, apiClient *api.Client) {
+func ProcessConversation(ctx context.Context, history *History, toolsList []api.Tool, cfg *config.Config, apiClient *api.Client, pauseCtrl *PauseController) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
 	for {
+		if err := pauseCtrl.WaitIfPaused(ctx); err != nil {
+			if errors.Is(err, context.Canceled) {
+				fmt.Println(ui.Warn("[System] Request canceled by user."))
+				return
+			}
+			fmt.Printf("\nError while paused: %v\n", err)
+			return
+		}
+
 		if ctx.Err() != nil {
 			fmt.Println(ui.Warn("[System] Current run stopped."))
 			return
@@ -52,6 +62,15 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 
 		// Process tool calls
 		for _, tCall := range assistantMsg.ToolCalls {
+			if err := pauseCtrl.WaitIfPaused(ctx); err != nil {
+				if errors.Is(err, context.Canceled) {
+					fmt.Println(ui.Warn("[System] Request canceled by user."))
+					return
+				}
+				fmt.Printf("\nError while paused: %v\n", err)
+				return
+			}
+
 			toolResponse := ""
 			switch tCall.Function.Name {
 			case "run_command":
@@ -170,6 +189,35 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 				}
 				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), output)
 
+			case "ask_user":
+				question, options, err := parseAskUserArgs(tCall.Function.Arguments)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for ask_user: %v", err)
+					break
+				}
+
+				answer, selectedIdx := askUserForClarification(question, options)
+				payload := map[string]any{
+					"question": question,
+					"answer":   answer,
+				}
+				if selectedIdx >= 0 && selectedIdx < len(options) {
+					payload["selected_option_index"] = selectedIdx
+					payload["selected_option"] = options[selectedIdx]
+				}
+				blob, _ := json.Marshal(payload)
+				toolResponse = string(blob)
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
+			case "organize_media_files":
+				output, err := tools.OrganizeMediaFiles(tCall.Function.Arguments)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: organize_media_files failed: %v", err)
+				} else {
+					toolResponse = output
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
 			case "subagent_factory":
 				if !cfg.SubagentExperimental {
 					toolResponse = "Error: subagent experimental mode is OFF. Run /subagent_experimental to enable it."
@@ -244,4 +292,67 @@ func extractSystemPrompt(messages []api.Message) string {
 		}
 	}
 	return ""
+}
+
+func parseAskUserArgs(raw string) (string, []string, error) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		return "", nil, err
+	}
+
+	question, _ := args["question"].(string)
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return "", nil, fmt.Errorf("ask_user requires a non-empty 'question'")
+	}
+
+	options := make([]string, 0)
+	if arr, ok := args["options"].([]any); ok {
+		for _, item := range arr {
+			if s, ok := item.(string); ok {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					options = append(options, s)
+				}
+			}
+		}
+	}
+
+	return question, options, nil
+}
+
+func askUserForClarification(question string, options []string) (string, int) {
+	fmt.Printf("\n%s\n", ui.Tool("[Clarification Required]"))
+	fmt.Printf("%s\n", question)
+	if len(options) > 0 {
+		fmt.Println("Options:")
+		for i, opt := range options {
+			fmt.Printf("  %d. %s\n", i+1, opt)
+		}
+		fmt.Print("Your answer (number or custom text): ")
+	} else {
+		fmt.Print("Your answer: ")
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		raw, _ := reader.ReadString('\n')
+		text := strings.TrimSpace(raw)
+		if text == "" {
+			fmt.Print("Please enter a response: ")
+			continue
+		}
+
+		if len(options) > 0 {
+			if n, err := strconv.Atoi(text); err == nil {
+				if n >= 1 && n <= len(options) {
+					return options[n-1], n - 1
+				}
+				fmt.Print("Invalid option number. Enter a valid number or custom text: ")
+				continue
+			}
+		}
+
+		return text, -1
+	}
 }

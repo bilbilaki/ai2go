@@ -44,10 +44,12 @@ func main() {
 	cliTool := tools.GetCLITool()
 	readTool := tools.GetReadFileTool()   // <--- New
 	patchTool := tools.GetPatchFileTool() // <--- New
+	askUserTool := tools.GetAskUserTool()
+	organizeMediaTool := tools.GetOrganizeMediaFilesTool()
 	subagentFactoryTool := tools.GetSubagentFactoryTool()
 	subagentContextTool := tools.GetSubagentContextProviderTool()
 	projectArchitectTool := tools.GetProjectArchitectTool()
-	toolsList := []api.Tool{cliTool, readTool, patchTool, subagentFactoryTool, subagentContextTool, projectArchitectTool}
+	toolsList := []api.Tool{cliTool, readTool, patchTool, askUserTool, organizeMediaTool, subagentFactoryTool, subagentContextTool, projectArchitectTool}
 	apiClient := api.NewClient(cfg)
 
 	homeDir, _ := os.UserHomeDir()
@@ -145,10 +147,33 @@ func main() {
 		history.AddUserMessage(finalMessage)
 		runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		fmt.Println(ui.System("Press Ctrl+C to stop current response/tools."))
-		chat.ProcessConversation(runCtx, history, toolsList, cfg, apiClient)
+		pauseCtrl := chat.NewPauseController()
+		pauseSig := make(chan os.Signal, 1)
+		chat.RegisterPauseSignal(pauseSig)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-pauseSig:
+					if pauseCtrl.Toggle() {
+						fmt.Println(ui.Warn("[System] Loop paused (Ctrl+Z). Press Ctrl+Z again to resume."))
+					} else {
+						fmt.Println(ui.System("[System] Loop resumed."))
+					}
+				}
+			}
+		}()
+
+		chat.ProcessConversation(runCtx, history, toolsList, cfg, apiClient, pauseCtrl)
+		chat.StopPauseSignal(pauseSig)
 		stop()
+		<-done
 		if err := store.SyncActiveHistory(history); err != nil {
 			fmt.Println(ui.Error(fmt.Sprintf("Warning: failed to persist thread history: %v", err)))
 		}
+		commands.TryAutoSummarize(history, store, cfg, apiClient)
 	}
 }

@@ -26,7 +26,7 @@ const (
 	statusUnknown         = "UNKNOWN"
 	maxSubagentIterations = 16
 	maxSubagentDepth      = 2
-	defaultTimeoutSec     = 300
+	defaultTimeoutSec     = 600
 	defaultConcurrency    = 3
 	finalizeWindow        = 20 * time.Second
 )

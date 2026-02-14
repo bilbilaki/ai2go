@@ -80,7 +80,14 @@ RULES:
    - If a command returns "[OUTPUT TRUNCATED]", DO NOT apologize. 
    - IMMEDIATELY run a new command to filter the data (e.g., 'grep "error" file.log', 'tail -n 10 file.log').
    - Never output huge chunks of text yourself.
-14. Always explain your plan briefly before executing commands.`, osName),
+14. Use 'ask_user' when requirements are ambiguous or there are multiple valid solution paths.
+    - Pass a clear 'question'.
+    - Add 'options' only if useful; otherwise ask free text.
+    - You may ask follow-up questions via repeated 'ask_user' calls until requirements are clear.
+15. For large messy media folders, prefer 'organize_media_files' instead of long shell loops:
+    - First run with dry_run=true and show preview summary.
+    - Then ask for confirmation and run with dry_run=false.
+16. Always explain your plan briefly before executing commands.`, osName),
 	}
 	h.messages = []api.Message{sysMsg}
 }
@@ -220,13 +227,12 @@ func (h *History) GetSanitizedMessages() []api.Message {
 func (h *History) ReplaceWithSummary(currentModel, summary string) {
 	h.Clear(currentModel)
 
-	summaryContext := fmt.Sprintf("Here is a summary of our conversation so far. Use this context to continue assisting me:\n\n%s", summary)
-
-	h.AddUserMessage(summaryContext)
-
-	h.AddAssistantMessage(api.Message{
-		Role:    "assistant",
-		Content: "Understood. I have updated my context with the summary and am ready to continue.",
+	h.messages = append(h.messages, api.Message{
+		Role: "system",
+		Content: fmt.Sprintf(
+			"Conversation memory (compressed summary):\n%s\n\nUse this as authoritative prior context for follow-up turns.",
+			summary,
+		),
 	})
 
 	fmt.Printf("\n\033[90m[Debug] Token count reset to: %d\033[0m\n", h.GetTotalTokens())

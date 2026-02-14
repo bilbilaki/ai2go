@@ -61,6 +61,54 @@ func GetPatchFileTool() api.Tool {
 	}
 }
 
+func GetAskUserTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "ask_user",
+			Description: "Ask the user a clarification question. Use when multiple solution paths exist or requirements are ambiguous.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"question": { "type": "string", "description": "Question to ask the user." },
+					"options": {
+						"type": "array",
+						"items": { "type": "string" },
+						"description": "Optional selectable choices. If omitted, user can answer freely."
+					}
+				},
+				"required": ["question"]
+			}`),
+		},
+	}
+}
+
+func GetOrganizeMediaFilesTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "organize_media_files",
+			Description: "Groups loose media files into title folders using filename heuristics. Supports dry-run preview and apply mode.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"directory": { "type": "string", "description": "Directory containing media files." },
+					"recursive": { "type": "boolean", "description": "Scan recursively. Default false." },
+					"dry_run": { "type": "boolean", "description": "If true, preview moves only. Default true." },
+					"min_group_size": { "type": "integer", "description": "Only create folders for groups with at least this many files. Default 2." },
+					"max_preview_actions": { "type": "integer", "description": "Maximum move previews in output. Default 200." },
+					"extensions": {
+						"type": "array",
+						"items": { "type": "string" },
+						"description": "Optional media extensions override (e.g. [\".mkv\", \".mp4\"])."
+					}
+				},
+				"required": ["directory"]
+			}`),
+		},
+	}
+}
+
 func GetSubagentFactoryTool() api.Tool {
 	return api.Tool{
 		Type: "function",
@@ -76,7 +124,7 @@ func GetSubagentFactoryTool() api.Tool {
 					"split_regex": { "type": "string", "description": "Optional regex splitter; overrides split_symbol if provided." },
 					"base_instruction": { "type": "string", "description": "Optional instruction prepended to every task." },
 					"max_concurrency": { "type": "integer", "description": "Concurrent subagents (1..200, default 3)." },
-					"timeout_sec": { "type": "integer", "description": "Per-task timeout in seconds (default 300)." },
+					"timeout_sec": { "type": "integer", "description": "Per-task timeout in seconds (default 600)." },
 					"ttl_seconds": { "type": "integer", "description": "TTL for volatile task context store (default 600)." },
 					"output_dir": { "type": "string", "description": "Optional output directory for results/report." },
 					"model": { "type": "string", "description": "Optional model override for subagents." }

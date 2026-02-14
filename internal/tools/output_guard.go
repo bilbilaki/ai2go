@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	maxReadFileLines = 300
+	maxReadFileLines = 1000
 	maxReadFileChars = 15000
 )
 
