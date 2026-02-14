@@ -12,6 +12,7 @@ type Config struct {
 	APIKey               string `json:"api_key"`
 	BaseURL              string `json:"base_url"`
 	ProxyURL             string `json:"proxy_url"`
+	TimeoutSeconds       int    `json:"timeout_seconds"`
 	AutoAccept           bool   `json:"auto_accept"`
 	SubagentExperimental bool   `json:"subagent_experimental"`
 	AutoSummarize        bool   `json:"auto_summarize"`
@@ -24,37 +25,39 @@ const (
 	appConfigDir                = ".config/ai2go"
 	configFile                  = "config.json"
 	defaultModel                = ""
+	defaultTimeoutSeconds       = 120
 	defaultAutoSummaryThreshold = 16000
 )
 
 func getConfigPath() (string, error) {
 	var dir string
 
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		dir = os.Getenv("USERPROFILE")
 		if dir == "" {
 			return "", fmt.Errorf("USERPROFILE env var not set on Windows")
 		}
-	}  else if runtime.GOOS == "android" {
-	// First try ADB directory
-	adbDir := "/data/data/adb/ai2go/"
-	
-	// Check if we can access and write to the directory
-	if info, err := os.Stat(adbDir); err == nil && info.IsDir() {
-		// Try to create a test file to check write permissions
-		testFile := filepath.Join(adbDir, ".test_write")
-		if err := os.WriteFile(testFile, []byte("test"), 0644); err == nil {
-			os.Remove(testFile) // Clean up test file
-			dir = adbDir
+	case "android":
+		// First try ADB directory
+		adbDir := "/data/data/adb/ai2go/"
+
+		// Check if we can access and write to the directory
+		if info, err := os.Stat(adbDir); err == nil && info.IsDir() {
+			// Try to create a test file to check write permissions
+			testFile := filepath.Join(adbDir, ".test_write")
+			if err := os.WriteFile(testFile, []byte("test"), 0644); err == nil {
+				os.Remove(testFile) // Clean up test file
+				dir = adbDir
+			} else {
+				// Can't write, fall back to Termux
+				dir = "/data/data/com.termux/files/home"
+			}
 		} else {
-			// Can't write, fall back to Termux
+			// Directory doesn't exist or isn't accessible
 			dir = "/data/data/com.termux/files/home"
 		}
-	} else {
-		// Directory doesn't exist or isn't accessible
-		dir = "/data/data/com.termux/files/home"
-	}
-}else {
+	default:
 		dir = os.Getenv("HOME")
 		if dir == "" {
 			return "", fmt.Errorf("HOME env var not set")
@@ -70,6 +73,7 @@ func getConfigPath() (string, error) {
 func Load() *Config {
 	cfg := &Config{
 		FirstSetup:           true,
+		TimeoutSeconds:       defaultTimeoutSeconds,
 		AutoSummaryThreshold: defaultAutoSummaryThreshold,
 	}
 
@@ -94,6 +98,9 @@ func Load() *Config {
 	}
 	if cfg.AutoSummaryThreshold <= 0 {
 		cfg.AutoSummaryThreshold = defaultAutoSummaryThreshold
+	}
+	if cfg.TimeoutSeconds <= 0 {
+		cfg.TimeoutSeconds = defaultTimeoutSeconds
 	}
 
 	return cfg

@@ -822,7 +822,7 @@ func (a Agent) executeToolCall(ctx context.Context, tc api.ToolCall) string {
 		if path == "" {
 			return "Error: read_file requires a non-empty 'path' argument."
 		}
-		out, err := tools.ReadFileWithLines(path)
+		out, err := tools.ReadFileWithLines(path, strings.TrimSpace(args["line_range"]))
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err)
 		}
