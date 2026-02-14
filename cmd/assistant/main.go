@@ -44,12 +44,19 @@ func main() {
 	cliTool := tools.GetCLITool()
 	readTool := tools.GetReadFileTool()   // <--- New
 	patchTool := tools.GetPatchFileTool() // <--- New
+	applyUnifiedPatchTool := tools.GetApplyUnifiedDiffPatchTool()
+	createCheckpointTool := tools.GetCreateCheckpointTool()
+	undoCheckpointsTool := tools.GetUndoCheckpointsTool()
+	editorHistoryTool := tools.GetEditorHistoryTool()
+	cpuUsageSampleTool := tools.GetCPUUsageSampleTool()
+	processSignalTool := tools.GetProcessSignalTool()
+	pageSizeTool := tools.GetPageSizeTool()
 	askUserTool := tools.GetAskUserTool()
 	organizeMediaTool := tools.GetOrganizeMediaFilesTool()
 	subagentFactoryTool := tools.GetSubagentFactoryTool()
 	subagentContextTool := tools.GetSubagentContextProviderTool()
 	projectArchitectTool := tools.GetProjectArchitectTool()
-	toolsList := []api.Tool{cliTool, readTool, patchTool, askUserTool, organizeMediaTool, subagentFactoryTool, subagentContextTool, projectArchitectTool}
+	toolsList := []api.Tool{cliTool, readTool, patchTool, applyUnifiedPatchTool, createCheckpointTool, undoCheckpointsTool, editorHistoryTool, cpuUsageSampleTool, processSignalTool, pageSizeTool, askUserTool, organizeMediaTool, subagentFactoryTool, subagentContextTool, projectArchitectTool}
 	apiClient := api.NewClient(cfg)
 
 	homeDir, _ := os.UserHomeDir()
