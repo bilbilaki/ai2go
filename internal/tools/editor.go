@@ -47,6 +47,28 @@ func ReadFileWithLines(path string) (string, error) {
 	}
 	defer file.Close()
 
+	var startLine, endLine int
+
+	// Parse line range if provided
+	if lineRange != "" {
+		parts := strings.Split(lineRange, "-")
+		if len(parts) != 2 {
+			return "", fmt.Errorf("invalid line range format, use 'start-end' (e.g., '400-600')")
+		}
+
+		var errStart, errEnd error
+		startLine, errStart = strconv.Atoi(strings.TrimSpace(parts[0]))
+		endLine, errEnd = strconv.Atoi(strings.TrimSpace(parts[1]))
+
+		if errStart != nil || errEnd != nil || startLine < 1 || endLine < startLine {
+			return "", fmt.Errorf("invalid line range: start and end must be positive integers with start <= end")
+		}
+	} else {
+		// Read all lines: set a very large end value
+		startLine = 1
+		endLine = int(^uint(0) >> 1) // Max int value
+	}
+
 	var result strings.Builder
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -120,12 +142,12 @@ func ApplyFilePatch(path, patchContent string) (string, error) {
 	}
 
 	// 2. Parse Patch
-	// Regex matches: "26" or "0" or "00", then "++" or "--", then optional content
-	re := regexp.MustCompile(`^(\d+|00)(\+\+|--)\s?(.*)$`)
+	// Regex matches: "26" or "0" or "00", then "++", "--", "<<", ">>", then optional content
+	re := regexp.MustCompile(`^(\d+|00)(\+\+|--|<<|>>)\s?(.*)$`)
 
 	type Operation struct {
-		Type    string // "delete", "replace", "prepend", "append"
-		Content string
+		Type  string // "delete", "replace", "insert_before", "insert_after"
+		Lines []string
 	}
 	ops := make(map[string]Operation)
 
@@ -143,21 +165,36 @@ func ApplyFilePatch(path, patchContent string) (string, error) {
 
 		target := matches[1] // Line number, "0", or "00"
 		operator := matches[2]
-		text := matches[3]
+		text := strings.ReplaceAll(matches[3], `\n`, "\n")
+		lines := []string{}
+		if text != "" {
+			lines = strings.Split(text, "\n")
+		}
 
-		if operator == "--" {
+		switch operator {
+		case "--":
 			ops[target] = Operation{Type: "delete"}
-		} else {
-			ops[target] = Operation{Type: "replace", Content: text}
+		case "++":
+			if target == "0" {
+				ops[target] = Operation{Type: "insert_before", Lines: lines}
+			} else if target == "00" {
+				ops[target] = Operation{Type: "insert_after", Lines: lines}
+			} else {
+				ops[target] = Operation{Type: "replace", Lines: lines}
+			}
+		case "<<":
+			ops[target] = Operation{Type: "insert_before", Lines: lines}
+		case ">>":
+			ops[target] = Operation{Type: "insert_after", Lines: lines}
 		}
 	}
 
 	// 3. Reconstruct Content
 	var newLines []string
 
-	// Handle Prepend (0++)
-	if op, ok := ops["0"]; ok && op.Type != "delete" {
-		newLines = append(newLines, op.Content)
+	// Handle Prepend (0<<)
+	if op, ok := ops["0"]; ok && op.Type == "insert_before" {
+		newLines = append(newLines, op.Lines...)
 	}
 
 	// Process Original Lines
@@ -167,17 +204,24 @@ func ApplyFilePatch(path, patchContent string) (string, error) {
 		if op, ok := ops[lineNumStr]; ok {
 			if op.Type == "delete" {
 				continue // Skip this line
-			} else if op.Type == "replace" {
-				newLines = append(newLines, op.Content)
+			}
+			if op.Type == "replace" {
+				newLines = append(newLines, op.Lines...)
+			} else {
+				newLines = append(newLines, line)
 			}
 		} else {
 			newLines = append(newLines, line)
 		}
+
+		if op, ok := ops[lineNumStr]; ok && op.Type == "insert_after" {
+			newLines = append(newLines, op.Lines...)
+		}
 	}
 
-	// Handle Append (00++)
-	if op, ok := ops["00"]; ok && op.Type != "delete" {
-		newLines = append(newLines, op.Content)
+	// Handle Append (00>>)
+	if op, ok := ops["00"]; ok && op.Type == "insert_after" {
+		newLines = append(newLines, op.Lines...)
 	}
 
 	// 4. Write to disk

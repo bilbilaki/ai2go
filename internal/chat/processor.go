@@ -54,6 +54,11 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 		}
 
 		history.AddAssistantMessage(assistantMsg)
+		if store != nil && chatID != 0 {
+			if err := store.SaveMessage(chatID, assistantMsg.Role, assistantMsg.Content); err != nil {
+				fmt.Printf("\n[Warning] Failed to save assistant message: %v\n", err)
+			}
+		}
 
 		// If the AI didn't call any tools, we are done with this turn
 		if len(assistantMsg.ToolCalls) == 0 {
@@ -141,6 +146,7 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 
 				output, err := tools.ReadFileWithLines(pathToRead)
 				if err != nil {
+					toolContent = fmt.Sprintf("Error: %v", err)
 					fmt.Printf("\033[31m[Error]\033[0m %v\n", err)
 					toolResponse = fmt.Sprintf("Error: %v", err)
 				} else {

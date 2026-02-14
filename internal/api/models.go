@@ -40,6 +40,8 @@ type ChatRequest struct {
 
 type Delta struct {
 	Content   string     `json:"content"`
+	Thinking  string     `json:"thinking,omitempty"`
+	Reasoning string     `json:"reasoning,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 

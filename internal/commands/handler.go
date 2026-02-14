@@ -70,6 +70,7 @@ func HandleCommand(cmd string, history *chat.History, store *chat.ThreadStore, c
 		reader := bufio.NewReader(os.Stdin)
 		newProxy, _ := reader.ReadString('\n')
 		cfg.SetProxyURL(strings.TrimSpace(newProxy))
+		apiClient.Reload()
 		if cfg.ProxyURL == "" {
 			fmt.Println("Proxy disabled!")
 		} else {

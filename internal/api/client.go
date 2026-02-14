@@ -57,10 +57,18 @@ func (c *Client) initHTTPClient() {
 		}
 	}
 
+	timeout := time.Duration(c.config.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
 	c.httpClient = &http.Client{
-		Timeout:   60 * time.Second,
+		Timeout:   timeout,
 		Transport: transport,
 	}
+}
+
+func (c *Client) Reload() {
+	c.initHTTPClient()
 }
 
 func (c *Client) GetAvailableModels() ([]Model, error) {
@@ -322,6 +330,15 @@ func (c *Client) handleStreamingResponse(ctx context.Context, body io.ReadCloser
 			var chunk StreamChunk
 			if json.Unmarshal([]byte(data), &chunk) == nil {
 				for _, choice := range chunk.Choices {
+					// Handle Thinking/Reasoning Content
+					if choice.Delta.Thinking != "" || choice.Delta.Reasoning != "" {
+						if !inThinkingBlock {
+							printThinkingBlockStart()
+							inThinkingBlock = true
+						}
+						printThinkingContent(choice.Delta.Thinking + choice.Delta.Reasoning)
+					}
+
 					// Handle Text Content
 					if choice.Delta.Content != "" {
 						if !printedAssistantPrefix {
@@ -343,6 +360,7 @@ func (c *Client) handleStreamingResponse(ctx context.Context, body io.ReadCloser
 								Type:     tcChunk.Type,
 								Function: FunctionCall{},
 							}
+							toolCallOrder = append(toolCallOrder, key)
 						}
 
 						// Append fragments
@@ -368,11 +386,32 @@ func (c *Client) handleStreamingResponse(ctx context.Context, body io.ReadCloser
 	}
 
 	// Reassemble tool calls into the final message
-	for i := 0; i <= currentToolCallIndex; i++ {
-		if tc, exists := toolCallIndices[i]; exists {
+	if inThinkingBlock {
+		printThinkingBlockEnd()
+	}
+	for _, key := range toolCallOrder {
+		if tc, exists := toolCallMap[key]; exists {
 			fullMessage.ToolCalls = append(fullMessage.ToolCalls, *tc)
 		}
 	}
 
 	return fullMessage, nil
+}
+
+func printThinkingBlockStart() {
+	fmt.Print("\n┌─ Thinking ───────────────────────────────────────────────┐\n")
+}
+
+func printThinkingContent(content string) {
+	if content == "" {
+		return
+	}
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		fmt.Printf("│ %s\n", line)
+	}
+}
+
+func printThinkingBlockEnd() {
+	fmt.Print("└─────────────────────────────────────────────────────────┘\n")
 }

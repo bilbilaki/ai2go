@@ -278,11 +278,18 @@ func GetReadFileTool() api.Tool {
 		Type: "function",
 		Function: api.ToolFunction{
 			Name:        "read_file",
-			Description: "Reads a file and returns content with line numbers (e.g. '1 | package main'). REQUIRED before using patch_file.",
+			Description: "Reads a file and returns content with line numbers (e.g. '1 | package main'). Supports reading all lines or a specific range. REQUIRED before using patch_file.",
 			Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {
-					"path": { "type": "string" }
+					"path": {
+						"type": "string",
+						"description": "Path to the file to read"
+					},
+					"line_range": {
+						"type": "string",
+						"description": "Optional line range in format 'start-end' (e.g., '400-600'). If omitted, reads entire file."
+					}
 				},
 				"required": ["path"]
 			}`),
@@ -295,7 +302,7 @@ func GetPatchFileTool() api.Tool {
 		Type: "function",
 		Function: api.ToolFunction{
 			Name:        "patch_file",
-			Description: "Edits a file using line-based patches. Syntax: 'N--' (delete), 'N++ content' (replace), '0++' (prepend), '00++' (append).",
+			Description: "Edits a file using line-based patches. Syntax: 'N--' (delete), 'N++ content' (replace), 'N<< content' (insert before), 'N>> content' (insert after), '0++/0<<' (prepend), '00++/00>>' (append). Use \\n for multi-line replacements.",
 			Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {

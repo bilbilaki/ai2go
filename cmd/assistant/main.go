@@ -12,6 +12,8 @@ import (
 	"github.com/bilbilaki/ai2go/internal/chat"
 	"github.com/bilbilaki/ai2go/internal/commands"
 	"github.com/bilbilaki/ai2go/internal/config"
+	"github.com/bilbilaki/ai2go/internal/session"
+	"github.com/bilbilaki/ai2go/internal/storage"
 	"github.com/bilbilaki/ai2go/internal/tools"
 	"github.com/bilbilaki/ai2go/internal/ui"
 	"github.com/bilbilaki/ai2go/internal/utils" // Import the new utils package
