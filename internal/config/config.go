@@ -9,64 +9,68 @@ import (
 )
 
 type Config struct {
-	APIKey         string `json:"api_key"`
-	BaseURL        string `json:"base_url"`
-	ProxyURL       string `json:"proxy_url"`
-	AutoAccept     bool   `json:"auto_accept"`
-	CurrentModel   string `json:"current_model"`
-	FirstSetup     bool   `json:"first_setup"`
-	TimeoutSeconds int    `json:"timeout_seconds"`
+	APIKey               string `json:"api_key"`
+	BaseURL              string `json:"base_url"`
+	ProxyURL             string `json:"proxy_url"`
+	AutoAccept           bool   `json:"auto_accept"`
+	SubagentExperimental bool   `json:"subagent_experimental"`
+	AutoSummarize        bool   `json:"auto_summarize"`
+	AutoSummaryThreshold int    `json:"auto_summary_threshold"`
+	CurrentModel         string `json:"current_model"`
+	FirstSetup           bool   `json:"first_setup"`
 }
 
 const (
-	appConfigDir          = ".config/ai2go"
-	configFile            = "config.json"
-	defaultModel          = ""
-	defaultTimeoutSeconds = 120
+	appConfigDir                = ".config/ai2go"
+	configFile                  = "config.json"
+	defaultModel                = ""
+	defaultAutoSummaryThreshold = 16000
 )
 
 func getConfigPath() (string, error) {
 	var dir string
+
 	if runtime.GOOS == "windows" {
 		dir = os.Getenv("USERPROFILE")
 		if dir == "" {
 			return "", fmt.Errorf("USERPROFILE env var not set on Windows")
 		}
+	}  else if runtime.GOOS == "android" {
+	// First try ADB directory
+	adbDir := "/data/data/adb/ai2go/"
+	
+	// Check if we can access and write to the directory
+	if info, err := os.Stat(adbDir); err == nil && info.IsDir() {
+		// Try to create a test file to check write permissions
+		testFile := filepath.Join(adbDir, ".test_write")
+		if err := os.WriteFile(testFile, []byte("test"), 0644); err == nil {
+			os.Remove(testFile) // Clean up test file
+			dir = adbDir
+		} else {
+			// Can't write, fall back to Termux
+			dir = "/data/data/com.termux/files/home"
+		}
 	} else {
+		// Directory doesn't exist or isn't accessible
+		dir = "/data/data/com.termux/files/home"
+	}
+}else {
 		dir = os.Getenv("HOME")
 		if dir == "" {
 			return "", fmt.Errorf("HOME env var not set")
 		}
 	}
+
 	configDir := filepath.Join(dir, appConfigDir)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create config dir: %w", err)
 	}
 	return filepath.Join(configDir, configFile), nil
 }
-
-func ConfigDir() (string, error) {
-	var dir string
-	if runtime.GOOS == "windows" {
-		dir = os.Getenv("USERPROFILE")
-		if dir == "" {
-			return "", fmt.Errorf("USERPROFILE env var not set on Windows")
-		}
-	} else {
-		dir = os.Getenv("HOME")
-		if dir == "" {
-			return "", fmt.Errorf("HOME env var not set")
-		}
-	}
-	configDir := filepath.Join(dir, appConfigDir)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create config dir: %w", err)
-	}
-	return configDir, nil
-}
 func Load() *Config {
 	cfg := &Config{
-		FirstSetup: true,
+		FirstSetup:           true,
+		AutoSummaryThreshold: defaultAutoSummaryThreshold,
 	}
 
 	configPath, err := getConfigPath()
@@ -88,13 +92,8 @@ func Load() *Config {
 	if cfg.CurrentModel == "" {
 		cfg.CurrentModel = defaultModel
 	}
-
-	if cfg.CurrentModel == "" {
-		cfg.FirstSetup = true
-	}
-
-	if cfg.TimeoutSeconds <= 0 {
-		cfg.TimeoutSeconds = defaultTimeoutSeconds
+	if cfg.AutoSummaryThreshold <= 0 {
+		cfg.AutoSummaryThreshold = defaultAutoSummaryThreshold
 	}
 
 	return cfg
@@ -142,6 +141,30 @@ func (c *Config) SetCurrentModel(model string) {
 
 func (c *Config) ToggleAutoAccept() {
 	c.AutoAccept = !c.AutoAccept
+	if err := c.Save(); err != nil {
+		fmt.Printf("Error saving config: %v\n", err)
+	}
+}
+
+func (c *Config) ToggleSubagentExperimental() {
+	c.SubagentExperimental = !c.SubagentExperimental
+	if err := c.Save(); err != nil {
+		fmt.Printf("Error saving config: %v\n", err)
+	}
+}
+
+func (c *Config) ToggleAutoSummarize() {
+	c.AutoSummarize = !c.AutoSummarize
+	if err := c.Save(); err != nil {
+		fmt.Printf("Error saving config: %v\n", err)
+	}
+}
+
+func (c *Config) SetAutoSummaryThreshold(tokens int) {
+	if tokens <= 0 {
+		tokens = defaultAutoSummaryThreshold
+	}
+	c.AutoSummaryThreshold = tokens
 	if err := c.Save(); err != nil {
 		fmt.Printf("Error saving config: %v\n", err)
 	}

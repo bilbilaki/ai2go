@@ -3,10 +3,13 @@ package chat
 import (
 	"fmt"
 	"runtime"
+	"unicode/utf8"
 
 	"github.com/bilbilaki/ai2go/internal/api"
 	"github.com/pandodao/tokenizer-go"
 )
+
+const maxToolResponseChars = 6000
 
 // TokenCounter approximates session token usage (1 token ~4 chars).
 type TokenCounter struct {
@@ -57,26 +60,37 @@ Current OS: %s
  
 RULES:
 1. You can use 'run_command' to execute shell commands.
-1. You can use 'read_file' first to see line numbers.
-2. You can use 'patch_file' with this custom syntax to edit:
-   - "26--"         -> Remove line 26.
-   - "26++ code"    -> Replace line 26 with "code".
-   - "26++"         -> Clear line 26 (make it empty).
-   - "26<< code"    -> Insert "code" before line 26.
-   - "26>> code"    -> Insert "code" after line 26.
-   - "26++ a\\nb"   -> Replace line 26 with multiple lines.
-   - "0++ code"     -> Insert "code" at the VERY START of file.
-   - "00++ code"    -> Append "code" to the VERY END of file.
-   - "0<< code"     -> Insert "code" at the VERY START of file.
-   - "00>> code"    -> Append "code" to the VERY END of file.
-3. IMPORTANT: If You want Using 'patch_file' for Editing files Use the ORIGINAL line numbers from 'read_file'. The tool handles the offsets automatically. Do not manually calculate shifted line numbers.
-4. HANDLING LONG OUTPUT:
+2. You can use 'read_file' to inspect files with line numbers.
+3. Prefer 'apply_unified_diff_patch' for edits using standard unified diffs (git diff format).
+   - Required args: 'work_tree', 'patch'
+   - Optional: 'verify_mode' in ['none', 'syntax', 'tests']
+   - It auto-checkpoints and auto-rolls back on apply/verify failures.
+4. You can use 'create_checkpoint', 'editor_history', and 'undo_checkpoints' for manual checkpoint workflow.
+5. Legacy 'patch_file' is still available for old line-based patches, but use unified diff tools by default.
+6. You can use process/system helpers when needed:
+   - 'get_process_cpu_usage_sample' for PID CPU sampling
+   - 'send_process_signal' for process tree signals
+   - 'get_page_size' for OS page size
+7. You can use 'subagent_factory' to split a mega task into concurrent subagent tasks and generate a report (requires experimental mode ON).
+8. You can use 'subagent_context_provider' with task_id to fetch summarized volatile context from a subagent run.
+9. You can use 'project_architect' to transform a rough project request into a detailed, implementation-ready step/task plan.
+10. If user asks to create a big project, or asks for long multi-step work with subagents, FIRST call 'project_architect' using the user request as prompt, then split/delegate tasks to subagents.
+11. For delegated execution, decide required subagent count from the generated plan and assign one concrete task per subagent.
+12. Subagents do not need 'project_architect'; planner is for main agent orchestration.
+13. When calling 'subagent_factory' for coding tasks, pass explicit 'timeout_sec' and 'max_concurrency'. Prefer lower concurrency for tasks that touch shared files.
+14. Do not run dependent file-overlapping tasks in parallel. Run them step-by-step if they modify the same modules.
+15. HANDLING LONG OUTPUT:
    - If a command returns "[OUTPUT TRUNCATED]", DO NOT apologize. 
    - IMMEDIATELY run a new command to filter the data (e.g., 'grep "error" file.log', 'tail -n 10 file.log').
    - Never output huge chunks of text yourself.
-5. Always explain your plan briefly before executing commands.
-6. Use 'search_files' for complex codebase searches (filtering by extension or content). It is 10x faster than 'run_command' with 'find'.
-7. Use 'list_tree' to understand the project structure before navigating.`, osName),
+16. Use 'ask_user' when requirements are ambiguous or there are multiple valid solution paths.
+    - Pass a clear 'question'.
+    - Add 'options' only if useful; otherwise ask free text.
+    - You may ask follow-up questions via repeated 'ask_user' calls until requirements are clear.
+17. For large messy media folders, prefer 'organize_media_files' instead of long shell loops:
+    - First run with dry_run=true and show preview summary.
+    - Then ask for confirmation and run with dry_run=false.
+18. Always explain your plan briefly before executing commands.`, osName),
 	}
 	h.messages = []api.Message{sysMsg}
 }
@@ -95,6 +109,8 @@ func (h *History) AddAssistantMessage(msg api.Message) {
 }
 
 func (h *History) AddToolResponse(toolCallID, content string) {
+	content = truncateForHistory(content, maxToolResponseChars)
+
 	// FIX: The API requires a non-empty 'content' field for tool messages.
 	// If the tool produced no output, we must provide a placeholder.
 	if content == "" {
@@ -113,22 +129,86 @@ func (h *History) AddToolResponse(toolCallID, content string) {
 	}
 }
 
+func truncateForHistory(s string, maxChars int) string {
+	if maxChars <= 0 || s == "" {
+		return s
+	}
+
+	if !utf8.ValidString(s) {
+		s = string([]rune(s))
+	}
+
+	runes := []rune(s)
+	if len(runes) <= maxChars {
+		return s
+	}
+
+	trimmed := string(runes[:maxChars])
+	return fmt.Sprintf("%s\n\n... [TOOL OUTPUT TRUNCATED FOR HISTORY: %d chars removed] ...", trimmed, len(runes)-maxChars)
+}
+
 func (h *History) Clear(currentModel string) {
 	h.SetSystemMessage(currentModel)
 	h.counter.Reset()
 }
 
-func (h *History) ReplaceWithMessages(currentModel string, messages []api.Message) {
-	h.SetSystemMessage(currentModel)
+func (h *History) LoadMessages(messages []api.Message, currentModel string) {
+	if len(messages) == 0 {
+		h.Clear(currentModel)
+		return
+	}
+
+	h.messages = make([]api.Message, len(messages))
+	copy(h.messages, messages)
+
 	h.counter.Reset()
-	for _, msg := range messages {
-		h.messages = append(h.messages, msg)
+	for _, msg := range h.messages {
+		if msg.Role == "system" {
+			continue
+		}
 		h.counter.Add(ApproximateTokens(msg.Content))
 	}
 }
 
 func (h *History) GetMessages() []api.Message {
 	return h.messages
+}
+
+func (h *History) GetMessagesForAPI() ([]api.Message, bool) {
+	if len(h.messages) == 0 {
+		return h.messages, false
+	}
+
+	clean := make([]api.Message, 0, len(h.messages))
+	pendingToolCalls := map[string]struct{}{}
+	changed := false
+
+	for _, msg := range h.messages {
+		switch msg.Role {
+		case "assistant":
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" {
+					pendingToolCalls[tc.ID] = struct{}{}
+				}
+			}
+			clean = append(clean, msg)
+		case "tool":
+			if msg.ToolCallID == "" {
+				changed = true
+				continue
+			}
+			if _, ok := pendingToolCalls[msg.ToolCallID]; !ok {
+				changed = true
+				continue
+			}
+			delete(pendingToolCalls, msg.ToolCallID)
+			clean = append(clean, msg)
+		default:
+			clean = append(clean, msg)
+		}
+	}
+
+	return clean, changed
 }
 
 func (h *History) GetTotalTokens() int64 {
@@ -150,13 +230,12 @@ func (h *History) GetSanitizedMessages() []api.Message {
 func (h *History) ReplaceWithSummary(currentModel, summary string) {
 	h.Clear(currentModel)
 
-	summaryContext := fmt.Sprintf("Here is a summary of our conversation so far. Use this context to continue assisting me:\n\n%s", summary)
-
-	h.AddUserMessage(summaryContext)
-
-	h.AddAssistantMessage(api.Message{
-		Role:    "assistant",
-		Content: "Understood. I have updated my context with the summary and am ready to continue.",
+	h.messages = append(h.messages, api.Message{
+		Role: "system",
+		Content: fmt.Sprintf(
+			"Conversation memory (compressed summary):\n%s\n\nUse this as authoritative prior context for follow-up turns.",
+			summary,
+		),
 	})
 
 	fmt.Printf("\n\033[90m[Debug] Token count reset to: %d\033[0m\n", h.GetTotalTokens())

@@ -1,20 +1,28 @@
 package commands
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/bilbilaki/ai2go/internal/ui"
+)
 
 func ShowHelp() {
 	fmt.Println("Commands:")
-	fmt.Println("  \033[36m/models\033[0m         - Show available models and switch")
-	fmt.Println("  \033[36m/current\033[0m        - Show current model")
-	fmt.Println("  \033[36m/clear\033[0m          - Clear conversation history")
-	fmt.Println("  \033[36m/file\033[0m           - add file content into chat")
-	fmt.Println("  \033[36m/change_url\033[0m     - Change base URL")
-	fmt.Println("  \033[36m/change_apikey\033[0m  - Change API key")
-	fmt.Println("  \033[36m/proxy\033[0m          - Set proxy URL")
-	fmt.Println("  \033[36m/autoaccept\033[0m     - Toggle auto-accept for commands")
-	fmt.Println("  \033[36m/history\033[0m        - Show chat history")
-	fmt.Println("  \033[36m/resume <id>\033[0m    - Resume a previous chat")
-	fmt.Println("  \033[36m/newchat\033[0m        - Start a new chat session")
-	fmt.Println("  \033[36m/help\033[0m           - Show available commands")
-	fmt.Println("  \033[36mexit/quit\033[0m       - Exit program")
+	fmt.Println("  " + ui.HelpCommand("/models", "Show available models and switch"))
+	fmt.Println("  " + ui.HelpCommand("/current", "Show current model"))
+	fmt.Println("  " + ui.HelpCommand("/clear", "Clear conversation history"))
+	fmt.Println("  " + ui.HelpCommand("/threads", "List threads (supports query, --sort, --order)"))
+	fmt.Println("  " + ui.HelpCommand("/thread", "Thread ops: new/open/rename/current"))
+	fmt.Println("  " + ui.HelpCommand("/search", "Search across thread titles and messages"))
+	fmt.Println("  " + ui.HelpCommand("/file", "add file content into chat"))
+	fmt.Println("  " + ui.HelpCommand("/change_url", "Change base URL"))
+	fmt.Println("  " + ui.HelpCommand("/change_apikey", "Change API key"))
+	fmt.Println("  " + ui.HelpCommand("/proxy", "Set proxy URL"))
+	fmt.Println("  " + ui.HelpCommand("/autoaccept", "Toggle auto-accept for commands"))
+	fmt.Println("  " + ui.HelpCommand("/subagent_experimental", "Toggle experimental subagent tool execution"))
+	fmt.Println("  " + ui.HelpCommand("/summarize", "Summarize thread now"))
+	fmt.Println("  " + ui.HelpCommand("/summarize auto on|off|status|threshold N", "Auto summarize controls"))
+	fmt.Println("  " + ui.HelpCommand("Ctrl+Z", "Pause/resume active run loop (during execution)"))
+	fmt.Println("  " + ui.HelpCommand("/help", "Show available commands"))
+	fmt.Println("  " + ui.HelpCommand("exit/quit", "Exit program"))
 }

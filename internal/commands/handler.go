@@ -10,11 +10,10 @@ import (
 	"github.com/bilbilaki/ai2go/internal/api"
 	"github.com/bilbilaki/ai2go/internal/chat"
 	"github.com/bilbilaki/ai2go/internal/config"
-	"github.com/bilbilaki/ai2go/internal/session"
-	"github.com/bilbilaki/ai2go/internal/storage"
+	"github.com/bilbilaki/ai2go/internal/ui"
 )
 
-func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiClient *api.Client, store *storage.Store, state *session.State) {
+func HandleCommand(cmd string, history *chat.History, store *chat.ThreadStore, cfg *config.Config, apiClient *api.Client) {
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
 		return
@@ -27,14 +26,30 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 		HandleModelSelection(cfg, apiClient)
 
 	case "/current":
-		fmt.Printf("Current model: \033[36m%s\033[0m\n", cfg.CurrentModel)
+		fmt.Printf("Current model: %s\n", ui.Name(cfg.CurrentModel))
+		exp := "OFF"
+		if cfg.SubagentExperimental {
+			exp = "ON"
+		}
+		fmt.Printf("Subagent experimental: %s\n", exp)
+		autoSummary := "OFF"
+		if cfg.AutoSummarize {
+			autoSummary = "ON"
+		}
+		fmt.Printf("Auto summarize: %s (threshold=%d)\n", autoSummary, cfg.AutoSummaryThreshold)
 
 	case "/clear":
 		history.Clear(cfg.CurrentModel)
-		fmt.Println("\033[32mConversation history cleared.\033[0m")
-		if state != nil {
-			state.HasMessages = false
+		if err := store.SyncActiveHistory(history); err != nil {
+			fmt.Printf("\033[31mError saving thread: %v\033[0m\n", err)
 		}
+		fmt.Println("\033[32mConversation history cleared.\033[0m")
+	case "/threads":
+		handleThreadsList(parts, store)
+	case "/thread":
+		handleThreadCommand(parts, history, store, cfg)
+	case "/search":
+		handleSearch(parts, store)
 
 	case "/change_url":
 		fmt.Print("Enter new Base URL: ")
@@ -69,56 +84,21 @@ func HandleCommand(cmd string, history *chat.History, cfg *config.Config, apiCli
 			status = "ON"
 		}
 		fmt.Printf("Auto-accept commands is now: %s\n", status)
-	case "/history":
-		HandleHistory(store)
-	case "/resume":
-		if len(parts) < 2 {
-			fmt.Println("Usage: /resume <chat_id>")
-			return
+	case "/subagent_experimental":
+		cfg.ToggleSubagentExperimental()
+		status := "OFF"
+		if cfg.SubagentExperimental {
+			status = "ON"
 		}
-		chatID, err := strconv.ParseInt(parts[1], 10, 64)
-		if err != nil {
-			fmt.Println("Invalid chat ID.")
-			return
-		}
-		if err := ResumeChat(history, cfg.CurrentModel, store, state, chatID); err != nil {
-			fmt.Printf("Failed to resume chat: %v\n", err)
-		}
-	case "/newchat", "/new":
-		if err := StartNewChat(history, cfg.CurrentModel, store, state); err != nil {
-			fmt.Printf("Failed to start new chat: %v\n", err)
-		}
+		fmt.Printf("Subagent experimental mode is now: %s\n", status)
 	case "/summarize":
-		fmt.Println("\n\033[33mGenerating session summary...\033[0m")
-
-		// 1. Prepare the prompt and sanitized history
-		msgs := history.GetSanitizedMessages()
-		prompt := "Summarize the current conversation history. " +
-			"Focus on the user's goals, key commands executed, and important context. " +
-			"Ignore specific details of long tool outputs (represented as 'toolcall successfully done'). " +
-			"Be concise but comprehensive."
-
-		msgs = append(msgs, api.Message{
-			Role:    "user",
-			Content: prompt,
-		})
-
-		// 2. Run completion (This will print the summary to the screen as it generates, which is good feedback)
-		summaryMsg, err := apiClient.RunCompletion(msgs, nil, cfg.CurrentModel)
-		if err != nil {
-			fmt.Printf("\033[31mError generating summary: %v\033[0m\n", err)
-			return
-		}
-
-		// 3. Replace the actual history with the new summary
-		history.ReplaceWithSummary(cfg.CurrentModel, summaryMsg.Content)
-		fmt.Println("\n\033[32mHistory summarized and context refreshed.\033[0m")
+		HandleSummarizeCommand(parts, history, store, cfg, apiClient)
 	case "/help":
 		ShowHelp()
 	case "/setup":
 		HandleSetup(cfg, apiClient)
 	default:
-		fmt.Printf("Unknown command: %s. Type /help for available commands.\n", command)
+		fmt.Println(ui.Warn(fmt.Sprintf("Unknown command: %s. Type /help for available commands.", command)))
 	}
 }
 

@@ -54,6 +54,15 @@ type StreamChunk struct {
 	Choices []Choice `json:"choices"`
 }
 
+type CompletionChoice struct {
+	Message      Message `json:"message"`
+	FinishReason string  `json:"finish_reason"`
+}
+
+type ChatCompletionResponse struct {
+	Choices []CompletionChoice `json:"choices"`
+}
+
 type Model struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
