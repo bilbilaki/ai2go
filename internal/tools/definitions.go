@@ -302,7 +302,7 @@ func GetPatchFileTool() api.Tool {
 		Type: "function",
 		Function: api.ToolFunction{
 			Name:        "patch_file",
-			Description: "Edits a file using line-based patches. Syntax: 'N--' (delete), 'N++ content' (replace), 'N<< content' (insert before), 'N>> content' (insert after), '0++/0<<' (prepend), '00++/00>>' (append). Use \\n for multi-line replacements.",
+			Description: "Default tool for file edits. Edits a file using line-based patches. Syntax: 'N--' (delete), 'N++ content' (replace), 'N<< content' (insert before), 'N>> content' (insert after), '0++/0<<' (prepend), '00++/00>>' (append). Use \\n for multi-line replacements.",
 			Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -320,7 +320,7 @@ func GetApplyUnifiedDiffPatchTool() api.Tool {
 		Type: "function",
 		Function: api.ToolFunction{
 			Name:        "apply_unified_diff_patch",
-			Description: "Applies a standard unified diff patch to a worktree using the editor git engine with checkpoint + rollback safety.",
+			Description: "Applies a standard unified diff patch for multi-file atomic edits using the editor git engine with checkpoint + rollback safety. Patch must include valid unified diff headers/hunks; if parse/header errors occur, switch to patch_file.",
 			Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -495,6 +495,181 @@ func GetOrganizeMediaFilesTool() api.Tool {
 					}
 				},
 				"required": ["directory"]
+			}`),
+		},
+	}
+}
+
+func GetRemoveLinesTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "remove_lines",
+			Description: "Remove specific lines or line ranges from a file.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "Target file path." },
+					"ranges": {
+						"type": "array",
+						"items": { "type": "string" },
+						"description": "Line/range specs like [\"10\", \"15-20\"]."
+					},
+					"start_line": { "type": "integer", "description": "Fallback single range start." },
+					"end_line": { "type": "integer", "description": "Fallback single range end (optional)." }
+				},
+				"required": ["path"]
+			}`),
+		},
+	}
+}
+
+func GetReplaceLineRangeTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "replace_line_range",
+			Description: "Replace text between start_line and end_line in a file.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "Target file path." },
+					"start_line": { "type": "integer", "description": "Start line (1-based)." },
+					"end_line": { "type": "integer", "description": "End line (1-based, inclusive)." },
+					"replacement": { "type": "string", "description": "Replacement text. Use \\n for multiline." }
+				},
+				"required": ["path", "start_line", "end_line", "replacement"]
+			}`),
+		},
+	}
+}
+
+func GetBatchLineOperationsTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "batch_line_operations",
+			Description: "Apply sequential batch line operations in one call.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "Target file path." },
+					"operations": {
+						"type": "array",
+						"description": "Operations applied in order.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"op": {
+									"type": "string",
+									"enum": ["delete", "replace", "insert_before", "insert_after"]
+								},
+								"line": { "type": "integer", "description": "Primary line index (1-based)." },
+								"end_line": { "type": "integer", "description": "Optional end line for delete/replace." },
+								"text": { "type": "string", "description": "Text for replace/insert operations." }
+							},
+							"required": ["op", "line"]
+						}
+					}
+				},
+				"required": ["path", "operations"]
+			}`),
+		},
+	}
+}
+
+func GetDeleteLinesByPatternTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "delete_lines_by_pattern",
+			Description: "Delete lines matching a regex pattern.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "Target file path." },
+					"pattern": { "type": "string", "description": "Regex pattern to match lines." },
+					"case_sensitive": { "type": "boolean", "description": "Case-sensitive regex match. Default false." }
+				},
+				"required": ["path", "pattern"]
+			}`),
+		},
+	}
+}
+
+func GetExtractLineRangeTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "extract_line_range",
+			Description: "Extract line range from a file with line-numbered output.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "Target file path." },
+					"start_line": { "type": "integer", "description": "Start line (1-based)." },
+					"end_line": { "type": "integer", "description": "End line (inclusive)." }
+				},
+				"required": ["path", "start_line", "end_line"]
+			}`),
+		},
+	}
+}
+
+func GetReorderLineRangeTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "reorder_line_range",
+			Description: "Move a line range to a new position (before target_line).",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "Target file path." },
+					"start_line": { "type": "integer", "description": "Start line of block." },
+					"end_line": { "type": "integer", "description": "End line of block." },
+					"target_line": { "type": "integer", "description": "Insert block before this line." }
+				},
+				"required": ["path", "start_line", "end_line", "target_line"]
+			}`),
+		},
+	}
+}
+
+func GetRemoveDuplicateLinesTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "remove_duplicate_lines",
+			Description: "Detect and remove duplicate lines while keeping first occurrences.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "Target file path." },
+					"case_sensitive": { "type": "boolean", "description": "Treat case differences as unique if true. Default false." },
+					"ignore_blank": { "type": "boolean", "description": "Skip duplicate detection for blank lines. Default false." }
+				},
+				"required": ["path"]
+			}`),
+		},
+	}
+}
+
+func GetMiniEditorHelperTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "mini_editor_helper",
+			Description: "Delegates text-editing work to a minimal helper agent loop with line-edit tools, then returns a concise report.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"prompt": { "type": "string", "description": "Task instructions for helper agent." },
+					"instruction": { "type": "string", "description": "Optional extra guardrails for helper scope." },
+					"timeout_sec": { "type": "integer", "description": "Optional helper timeout in seconds (default 240)." },
+					"model": { "type": "string", "description": "Optional model override for helper run." }
+				},
+				"required": ["prompt"]
 			}`),
 		},
 	}

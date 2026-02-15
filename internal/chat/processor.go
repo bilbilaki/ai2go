@@ -73,6 +73,10 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 
 			toolResponse := ""
 			switch tCall.Function.Name {
+			case "remove_lines", "replace_line_range", "batch_line_operations", "delete_lines_by_pattern", "extract_line_range", "reorder_line_range", "remove_duplicate_lines":
+				_, toolResponse = tools.ExecuteLineTool(tCall.Function.Name, tCall.Function.Arguments)
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
 			case "run_command":
 				var args map[string]string
 				if err := json.Unmarshal([]byte(tCall.Function.Arguments), &args); err != nil {
@@ -212,7 +216,14 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 				}
 				output, err := tools.ApplyUnifiedDiffPatch(workTree, patch, verifyMode)
 				if err != nil {
-					toolResponse = fmt.Sprintf("Error: %v", err)
+					errMsg := err.Error()
+					if strings.Contains(errMsg, "patch fragment without header") ||
+						strings.Contains(errMsg, "failed to apply unified diff") ||
+						strings.Contains(errMsg, "No valid patches in input") {
+						toolResponse = fmt.Sprintf("Error: %v\nHint: unified diff parsing failed. Re-read target files and use patch_file for this edit.", err)
+					} else {
+						toolResponse = fmt.Sprintf("Error: %v", err)
+					}
 				} else {
 					toolResponse = output
 				}
@@ -391,6 +402,22 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 				output, err := tools.OrganizeMediaFiles(tCall.Function.Arguments)
 				if err != nil {
 					toolResponse = fmt.Sprintf("Error: organize_media_files failed: %v", err)
+				} else {
+					toolResponse = output
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+
+			case "mini_editor_helper":
+				input, err := subagent.ParseMiniEditorHelperInput(tCall.Function.Arguments)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for mini_editor_helper: %v", err)
+					break
+				}
+				systemPrompt := extractSystemPrompt(history.GetMessages())
+				fmt.Printf("\n%s\n", ui.Tool("[Mini Helper] Starting minimal editor helper..."))
+				output, err := subagent.DefaultManager().RunMiniEditorHelper(ctx, apiClient, cfg.CurrentModel, systemPrompt, input)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: mini_editor_helper failed: %v", err)
 				} else {
 					toolResponse = output
 				}

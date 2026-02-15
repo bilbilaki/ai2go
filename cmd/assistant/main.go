@@ -53,10 +53,18 @@ func main() {
 	pageSizeTool := tools.GetPageSizeTool()
 	askUserTool := tools.GetAskUserTool()
 	organizeMediaTool := tools.GetOrganizeMediaFilesTool()
+	removeLinesTool := tools.GetRemoveLinesTool()
+	replaceLineRangeTool := tools.GetReplaceLineRangeTool()
+	batchLineOpsTool := tools.GetBatchLineOperationsTool()
+	deleteByPatternTool := tools.GetDeleteLinesByPatternTool()
+	extractLineRangeTool := tools.GetExtractLineRangeTool()
+	reorderLineRangeTool := tools.GetReorderLineRangeTool()
+	removeDuplicateLinesTool := tools.GetRemoveDuplicateLinesTool()
+	miniEditorHelperTool := tools.GetMiniEditorHelperTool()
 	subagentFactoryTool := tools.GetSubagentFactoryTool()
 	subagentContextTool := tools.GetSubagentContextProviderTool()
 	projectArchitectTool := tools.GetProjectArchitectTool()
-	toolsList := []api.Tool{cliTool, readTool, patchTool, applyUnifiedPatchTool, createCheckpointTool, undoCheckpointsTool, editorHistoryTool, cpuUsageSampleTool, processSignalTool, pageSizeTool, askUserTool, organizeMediaTool, subagentFactoryTool, subagentContextTool, projectArchitectTool}
+	toolsList := []api.Tool{cliTool, readTool, patchTool, applyUnifiedPatchTool, createCheckpointTool, undoCheckpointsTool, editorHistoryTool, cpuUsageSampleTool, processSignalTool, pageSizeTool, askUserTool, organizeMediaTool, removeLinesTool, replaceLineRangeTool, batchLineOpsTool, deleteByPatternTool, extractLineRangeTool, reorderLineRangeTool, removeDuplicateLinesTool, miniEditorHelperTool, subagentFactoryTool, subagentContextTool, projectArchitectTool}
 	apiClient := api.NewClient(cfg)
 
 	homeDir, _ := os.UserHomeDir()
