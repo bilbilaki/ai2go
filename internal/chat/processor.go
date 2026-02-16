@@ -76,6 +76,9 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 			case "remove_lines", "replace_line_range", "batch_line_operations", "delete_lines_by_pattern", "extract_line_range", "reorder_line_range", "remove_duplicate_lines":
 				_, toolResponse = tools.ExecuteLineTool(tCall.Function.Name, tCall.Function.Arguments)
 				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+			case "show_file_diff", "compare_files_side_by_side", "create_file_backup", "restore_file_backup", "merge_files", "detect_file_type":
+				_, toolResponse = tools.ExecuteFileManagementTool(tCall.Function.Name, tCall.Function.Arguments)
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
 
 			case "run_command":
 				var args map[string]string
@@ -418,6 +421,21 @@ func ProcessConversation(ctx context.Context, history *History, toolsList []api.
 				output, err := subagent.DefaultManager().RunMiniEditorHelper(ctx, apiClient, cfg.CurrentModel, systemPrompt, input)
 				if err != nil {
 					toolResponse = fmt.Sprintf("Error: mini_editor_helper failed: %v", err)
+				} else {
+					toolResponse = output
+				}
+				fmt.Printf("%s\n%s\n----------------\n", ui.Tool("[Output]"), toolResponse)
+			case "mini_file_helper":
+				input, err := subagent.ParseMiniFileHelperInput(tCall.Function.Arguments)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: invalid arguments for mini_file_helper: %v", err)
+					break
+				}
+				systemPrompt := extractSystemPrompt(history.GetMessages())
+				fmt.Printf("\n%s\n", ui.Tool("[Mini File Helper] Starting file management helper..."))
+				output, err := subagent.DefaultManager().RunMiniFileHelper(ctx, apiClient, cfg.CurrentModel, systemPrompt, input)
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error: mini_file_helper failed: %v", err)
 				} else {
 					toolResponse = output
 				}

@@ -49,3 +49,17 @@ func TestParseMiniEditorHelperInputDefaults(t *testing.T) {
 		t.Fatalf("expected default mini timeout %d, got %d", defaultMiniTimeoutSec, in.TimeoutSec)
 	}
 }
+
+func TestParseMiniFileHelperInputDefaults(t *testing.T) {
+	raw := `{"prompt":"compare files"}` + "\n"
+	in, err := ParseMiniFileHelperInput(raw)
+	if err != nil {
+		t.Fatalf("ParseMiniFileHelperInput error: %v", err)
+	}
+	if in.Prompt != "compare files" {
+		t.Fatalf("unexpected prompt: %q", in.Prompt)
+	}
+	if in.TimeoutSec != defaultMiniTimeoutSec {
+		t.Fatalf("expected default mini timeout %d, got %d", defaultMiniTimeoutSec, in.TimeoutSec)
+	}
+}

@@ -53,6 +53,13 @@ type MiniEditorHelperInput struct {
 	Model       string
 }
 
+type MiniFileHelperInput struct {
+	Prompt      string
+	Instruction string
+	TimeoutSec  int
+	Model       string
+}
+
 type TaskBrief struct {
 	TaskID        string `json:"task_id"`
 	PromptPreview string `json:"prompt_preview"`
@@ -493,6 +500,30 @@ func ParseMiniEditorHelperInput(raw string) (MiniEditorHelperInput, error) {
 	return in, nil
 }
 
+func ParseMiniFileHelperInput(raw string) (MiniFileHelperInput, error) {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		return MiniFileHelperInput{}, fmt.Errorf("invalid arguments JSON: %w", err)
+	}
+
+	in := MiniFileHelperInput{
+		Prompt:      getString(obj, "prompt", ""),
+		Instruction: getString(obj, "instruction", ""),
+		TimeoutSec:  getInt(obj, "timeout_sec", defaultMiniTimeoutSec),
+		Model:       getString(obj, "model", ""),
+	}
+	if strings.TrimSpace(in.Prompt) == "" {
+		return MiniFileHelperInput{}, fmt.Errorf("prompt is required")
+	}
+	if in.TimeoutSec <= 0 {
+		in.TimeoutSec = defaultMiniTimeoutSec
+	}
+	if in.TimeoutSec > 1800 {
+		in.TimeoutSec = 1800
+	}
+	return in, nil
+}
+
 func (m *Manager) RunMiniEditorHelper(ctx context.Context, client *api.Client, defaultModel, systemPrompt string, input MiniEditorHelperInput) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("api client is required")
@@ -590,6 +621,102 @@ func (m *Manager) RunMiniEditorHelper(ctx context.Context, client *api.Client, d
 	return "", fmt.Errorf("mini helper exceeded maximum tool iterations (%d)", maxMiniHelperIters)
 }
 
+func (m *Manager) RunMiniFileHelper(ctx context.Context, client *api.Client, defaultModel, systemPrompt string, input MiniFileHelperInput) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("api client is required")
+	}
+	if strings.TrimSpace(input.Prompt) == "" {
+		return "", fmt.Errorf("prompt is required")
+	}
+
+	model := strings.TrimSpace(input.Model)
+	if model == "" {
+		model = strings.TrimSpace(defaultModel)
+	}
+	if model == "" {
+		return "", fmt.Errorf("model is empty")
+	}
+
+	timeout := input.TimeoutSec
+	if timeout <= 0 {
+		timeout = defaultMiniTimeoutSec
+	}
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	helperSystem := strings.TrimSpace(systemPrompt)
+	if helperSystem == "" {
+		helperSystem = "You are a precise file-management helper."
+	}
+	helperSystem += "\n\nYou are a mini helper agent for the main agent. Use only the provided file-management tools. Keep scope narrow and return concise results with files touched."
+
+	userPrompt := strings.TrimSpace(input.Prompt)
+	if strings.TrimSpace(input.Instruction) != "" {
+		userPrompt = fmt.Sprintf("Instruction:\\n%s\\n\\nTask:\\n%s", strings.TrimSpace(input.Instruction), strings.TrimSpace(input.Prompt))
+	}
+
+	msgs := []api.Message{
+		{Role: "system", Content: helperSystem},
+		{Role: "user", Content: userPrompt},
+	}
+
+	toolList := []api.Tool{
+		tools.GetReadFileTool(),
+		tools.GetFileDiffViewerTool(),
+		tools.GetFileComparisonTool(),
+		tools.GetCreateFileBackupTool(),
+		tools.GetRestoreFileBackupTool(),
+		tools.GetFileMergingTool(),
+		tools.GetFileTypeDetectionTool(),
+	}
+
+	progress := strings.Builder{}
+	for i := 0; i < maxMiniHelperIters; i++ {
+		resp, err := client.RunCompletionOnce(runCtx, msgs, toolList, model)
+		if err != nil {
+			if progress.Len() > 0 {
+				return strings.TrimSpace(progress.String()), err
+			}
+			return "", err
+		}
+		msgs = append(msgs, resp)
+
+		if txt := strings.TrimSpace(resp.Content); txt != "" {
+			progress.WriteString("Assistant:\n")
+			progress.WriteString(txt)
+			progress.WriteString("\n\n")
+		}
+
+		if len(resp.ToolCalls) == 0 {
+			if progress.Len() == 0 {
+				return strings.TrimSpace(resp.Content), nil
+			}
+			return strings.TrimSpace(progress.String()), nil
+		}
+
+		for _, tc := range resp.ToolCalls {
+			toolOutput := miniFileExecuteToolCall(tc)
+			if snip := snippet(toolOutput, 500); strings.TrimSpace(snip) != "" {
+				progress.WriteString("ToolCall: ")
+				progress.WriteString(tc.Function.Name)
+				progress.WriteString("\nToolOutput:\n")
+				progress.WriteString(snip)
+				progress.WriteString("\n\n")
+			}
+			msgs = append(msgs, api.Message{
+				Role:       "tool",
+				ToolCallID: tc.ID,
+				Content:    toolOutput,
+			})
+		}
+	}
+
+	if progress.Len() > 0 {
+		return strings.TrimSpace(progress.String()), fmt.Errorf("mini file helper exceeded maximum tool iterations (%d)", maxMiniHelperIters)
+	}
+	return "", fmt.Errorf("mini file helper exceeded maximum tool iterations (%d)", maxMiniHelperIters)
+}
+
 func miniExecuteToolCall(tc api.ToolCall) string {
 	switch tc.Function.Name {
 	case "read_file":
@@ -612,6 +739,31 @@ func miniExecuteToolCall(tc api.ToolCall) string {
 			return output
 		}
 		return fmt.Sprintf("Error: unsupported helper tool '%s'", tc.Function.Name)
+	}
+}
+
+func miniFileExecuteToolCall(tc api.ToolCall) string {
+	switch tc.Function.Name {
+	case "read_file":
+		var args map[string]string
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			return fmt.Sprintf("Error: invalid arguments for read_file: %v", err)
+		}
+		path := strings.TrimSpace(args["path"])
+		if path == "" {
+			return "Error: read_file requires a non-empty 'path' argument."
+		}
+		out, err := tools.ReadFileWithLines(path, strings.TrimSpace(args["line_range"]))
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err)
+		}
+		return out
+	default:
+		handled, output := tools.ExecuteFileManagementTool(tc.Function.Name, tc.Function.Arguments)
+		if handled {
+			return output
+		}
+		return fmt.Sprintf("Error: unsupported file helper tool '%s'", tc.Function.Name)
 	}
 }
 
@@ -855,6 +1007,12 @@ func (a Agent) Run(ctx context.Context, taskPrompt, instruction string) (string,
 		tools.GetExtractLineRangeTool(),
 		tools.GetReorderLineRangeTool(),
 		tools.GetRemoveDuplicateLinesTool(),
+		tools.GetFileDiffViewerTool(),
+		tools.GetFileComparisonTool(),
+		tools.GetCreateFileBackupTool(),
+		tools.GetRestoreFileBackupTool(),
+		tools.GetFileMergingTool(),
+		tools.GetFileTypeDetectionTool(),
 		tools.GetSubagentContextProviderTool(),
 	}
 	if a.experimentalEnabled {
@@ -1185,6 +1343,9 @@ func (a Agent) executeToolCall(ctx context.Context, tc api.ToolCall) string {
 		return FormatBatchReport(report)
 	default:
 		if handled, output := tools.ExecuteLineTool(tc.Function.Name, tc.Function.Arguments); handled {
+			return output
+		}
+		if handled, output := tools.ExecuteFileManagementTool(tc.Function.Name, tc.Function.Arguments); handled {
 			return output
 		}
 		return fmt.Sprintf("Error: unsupported tool '%s'", tc.Function.Name)

@@ -61,10 +61,17 @@ func main() {
 	reorderLineRangeTool := tools.GetReorderLineRangeTool()
 	removeDuplicateLinesTool := tools.GetRemoveDuplicateLinesTool()
 	miniEditorHelperTool := tools.GetMiniEditorHelperTool()
+	fileDiffViewerTool := tools.GetFileDiffViewerTool()
+	fileComparisonTool := tools.GetFileComparisonTool()
+	createFileBackupTool := tools.GetCreateFileBackupTool()
+	restoreFileBackupTool := tools.GetRestoreFileBackupTool()
+	fileMergingTool := tools.GetFileMergingTool()
+	fileTypeDetectionTool := tools.GetFileTypeDetectionTool()
+	miniFileHelperTool := tools.GetMiniFileHelperTool()
 	subagentFactoryTool := tools.GetSubagentFactoryTool()
 	subagentContextTool := tools.GetSubagentContextProviderTool()
 	projectArchitectTool := tools.GetProjectArchitectTool()
-	toolsList := []api.Tool{cliTool, readTool, patchTool, applyUnifiedPatchTool, createCheckpointTool, undoCheckpointsTool, editorHistoryTool, cpuUsageSampleTool, processSignalTool, pageSizeTool, askUserTool, organizeMediaTool, removeLinesTool, replaceLineRangeTool, batchLineOpsTool, deleteByPatternTool, extractLineRangeTool, reorderLineRangeTool, removeDuplicateLinesTool, miniEditorHelperTool, subagentFactoryTool, subagentContextTool, projectArchitectTool}
+	toolsList := []api.Tool{cliTool, readTool, patchTool, applyUnifiedPatchTool, createCheckpointTool, undoCheckpointsTool, editorHistoryTool, cpuUsageSampleTool, processSignalTool, pageSizeTool, askUserTool, organizeMediaTool, removeLinesTool, replaceLineRangeTool, batchLineOpsTool, deleteByPatternTool, extractLineRangeTool, reorderLineRangeTool, removeDuplicateLinesTool, miniEditorHelperTool, fileDiffViewerTool, fileComparisonTool, createFileBackupTool, restoreFileBackupTool, fileMergingTool, fileTypeDetectionTool, miniFileHelperTool, subagentFactoryTool, subagentContextTool, projectArchitectTool}
 	apiClient := api.NewClient(cfg)
 
 	homeDir, _ := os.UserHomeDir()

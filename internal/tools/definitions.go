@@ -675,6 +675,136 @@ func GetMiniEditorHelperTool() api.Tool {
 	}
 }
 
+func GetFileDiffViewerTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "show_file_diff",
+			Description: "Show differences between file versions. Compare path vs compare_path or a backup_id.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "Primary file path." },
+					"compare_path": { "type": "string", "description": "Second file path to compare against." },
+					"backup_id": { "type": "string", "description": "Optional backup id to diff against." }
+				},
+				"required": ["path"]
+			}`),
+		},
+	}
+}
+
+func GetFileComparisonTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "compare_files_side_by_side",
+			Description: "Compare two files side by side line-by-line.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"left_path": { "type": "string", "description": "Left file path." },
+					"right_path": { "type": "string", "description": "Right file path." },
+					"width": { "type": "integer", "description": "Optional output width." }
+				},
+				"required": ["left_path", "right_path"]
+			}`),
+		},
+	}
+}
+
+func GetCreateFileBackupTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "create_file_backup",
+			Description: "Create a file backup snapshot and return backup_id.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "File path to back up." }
+				},
+				"required": ["path"]
+			}`),
+		},
+	}
+}
+
+func GetRestoreFileBackupTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "restore_file_backup",
+			Description: "Restore a file from backup_id.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "Target file path to overwrite." },
+					"backup_id": { "type": "string", "description": "Backup ID returned by create_file_backup." }
+				},
+				"required": ["path", "backup_id"]
+			}`),
+		},
+	}
+}
+
+func GetFileMergingTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "merge_files",
+			Description: "Merge base, left, and right files using simple 3-way merge with conflict markers.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"base_path": { "type": "string", "description": "Base/original file path." },
+					"left_path": { "type": "string", "description": "Left variant file path." },
+					"right_path": { "type": "string", "description": "Right variant file path." },
+					"output_path": { "type": "string", "description": "Optional output path. Defaults to base_path + .merged" }
+				},
+				"required": ["base_path", "left_path", "right_path"]
+			}`),
+		},
+	}
+}
+
+func GetFileTypeDetectionTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "detect_file_type",
+			Description: "Detect file type/format details including mime, extension, encoding guess, and binary hint.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "File path to inspect." }
+				},
+				"required": ["path"]
+			}`),
+		},
+	}
+}
+
+func GetMiniFileHelperTool() api.Tool {
+	return api.Tool{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "mini_file_helper",
+			Description: "Delegates file-management tasks to a minimal helper agent loop specialized for diff/compare/backup/merge/type-detect tools.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"prompt": { "type": "string", "description": "Task instructions for helper agent." },
+					"instruction": { "type": "string", "description": "Optional scope guardrails." },
+					"timeout_sec": { "type": "integer", "description": "Optional helper timeout in seconds (default 240)." },
+					"model": { "type": "string", "description": "Optional model override for helper run." }
+				},
+				"required": ["prompt"]
+			}`),
+		},
+	}
+}
+
 func GetSubagentFactoryTool() api.Tool {
 	return api.Tool{
 		Type: "function",

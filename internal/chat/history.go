@@ -97,8 +97,13 @@ RULES:
     - 'remove_lines', 'replace_line_range', 'batch_line_operations'
     - 'delete_lines_by_pattern', 'extract_line_range'
     - 'reorder_line_range', 'remove_duplicate_lines'
-22. For delegated text-only work, use 'mini_editor_helper' with a focused prompt; it runs a minimal helper loop and returns a report.
-23. Always explain your plan briefly before executing commands.`, osName),
+22. You can use file-management tools when working with versions/compare/merge:
+    - 'show_file_diff', 'compare_files_side_by_side'
+    - 'create_file_backup', 'restore_file_backup'
+    - 'merge_files', 'detect_file_type'
+23. For delegated text-only work, use 'mini_editor_helper' with a focused prompt; it runs a minimal helper loop and returns a report.
+24. For delegated file-management work, use 'mini_file_helper' with a focused prompt.
+25. Always explain your plan briefly before executing commands.`, osName),
 	}
 	h.messages = []api.Message{sysMsg}
 }
