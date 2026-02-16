@@ -24,7 +24,8 @@ const (
 )
 
 // ReadFileWithLines returns content with line numbers (e.g., "1 | package main").
-func ReadFileWithLines(path string) (string, error) {
+// lineRange format: "start-end" (e.g., "400-600"), empty string reads full file.
+func ReadFileWithLines(path, lineRange string) (string, error) {
 	sampleFile, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)

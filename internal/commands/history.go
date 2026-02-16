@@ -56,7 +56,7 @@ func ResumeChat(history *chat.History, currentModel string, store *storage.Store
 	if err != nil {
 		return err
 	}
-	history.ReplaceWithMessages(currentModel, messages)
+	history.LoadMessages(messages, currentModel)
 	if state != nil {
 		state.ChatID = chatID
 		state.Title = title

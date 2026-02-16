@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"strings"
 
 	"github.com/bilbilaki/ai2go/internal/api"
@@ -12,7 +13,7 @@ func GenerateChatTitle(apiClient *api.Client, model, content string) (string, er
 		{Role: "system", Content: prompt},
 		{Role: "user", Content: content},
 	}
-	resp, err := apiClient.RunCompletion(msgs, nil, model)
+	resp, err := apiClient.RunCompletionOnce(context.Background(), msgs, nil, model)
 	if err != nil {
 		return "", err
 	}

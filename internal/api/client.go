@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -301,7 +302,7 @@ func (c *Client) handleStreamingResponse(ctx context.Context, body io.ReadCloser
 	fullMessage.Role = "assistant"
 
 	toolCallIndices := make(map[int]*ToolCall)
-	currentToolCallIndex := -1
+	inThinkingBlock := false
 	printedAssistantPrefix := false
 
 	for {
@@ -352,7 +353,6 @@ func (c *Client) handleStreamingResponse(ctx context.Context, body io.ReadCloser
 					// Handle Tool Call chunks
 					for i, tcChunk := range choice.Delta.ToolCalls {
 						idx := i
-						currentToolCallIndex = idx
 
 						if _, exists := toolCallIndices[idx]; !exists {
 							toolCallIndices[idx] = &ToolCall{
@@ -360,7 +360,6 @@ func (c *Client) handleStreamingResponse(ctx context.Context, body io.ReadCloser
 								Type:     tcChunk.Type,
 								Function: FunctionCall{},
 							}
-							toolCallOrder = append(toolCallOrder, key)
 						}
 
 						// Append fragments
@@ -389,10 +388,13 @@ func (c *Client) handleStreamingResponse(ctx context.Context, body io.ReadCloser
 	if inThinkingBlock {
 		printThinkingBlockEnd()
 	}
-	for _, key := range toolCallOrder {
-		if tc, exists := toolCallMap[key]; exists {
-			fullMessage.ToolCalls = append(fullMessage.ToolCalls, *tc)
-		}
+	toolCallKeys := make([]int, 0, len(toolCallIndices))
+	for idx := range toolCallIndices {
+		toolCallKeys = append(toolCallKeys, idx)
+	}
+	sort.Ints(toolCallKeys)
+	for _, idx := range toolCallKeys {
+		fullMessage.ToolCalls = append(fullMessage.ToolCalls, *toolCallIndices[idx])
 	}
 
 	return fullMessage, nil

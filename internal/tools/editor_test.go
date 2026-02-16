@@ -20,7 +20,7 @@ func TestReadFileWithLinesUsesRaisedLineLimit(t *testing.T) {
 		t.Fatalf("failed to create fixture: %v", err)
 	}
 
-	out, err := ReadFileWithLines(path)
+	out, err := ReadFileWithLines(path, "")
 	if err != nil {
 		t.Fatalf("ReadFileWithLines returned error: %v", err)
 	}
